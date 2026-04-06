@@ -3,20 +3,21 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"omnicorp-analyst/internal/models"
 )
 
 func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error {
 	if article.PublishedAt != nil {
-		utc := article.PublishedAt.UTC()
-		article.PublishedAt = &utc
+		local := article.PublishedAt.Format(time.RFC3339)
+		article.PublishedAtLocal = &local
 	}
 
 	query := `
-		INSERT INTO articles (company_id, title, content, source, published_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, created_at, updated_at`
+		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at_utc, updated_at_utc`
 
 	err := db.Pool.QueryRow(ctx, query,
 		article.CompanyID,
@@ -24,6 +25,7 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 		article.Content,
 		article.Source,
 		article.PublishedAt,
+		article.PublishedAtLocal,
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create article: %w", err)
@@ -34,7 +36,7 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 
 func (db *DB) GetArticleByID(ctx context.Context, id int64) (*models.Article, error) {
 	query := `
-		SELECT id, company_id, title, content, source, published_at, created_at, updated_at
+		SELECT id, company_id, title, content, source, published_at, published_at_local, created_at_utc, updated_at_utc
 		FROM articles
 		WHERE id = $1`
 
@@ -46,6 +48,7 @@ func (db *DB) GetArticleByID(ctx context.Context, id int64) (*models.Article, er
 		&article.Content,
 		&article.Source,
 		&article.PublishedAt,
+		&article.PublishedAtLocal,
 		&article.CreatedAt,
 		&article.UpdatedAt,
 	)
@@ -58,7 +61,7 @@ func (db *DB) GetArticleByID(ctx context.Context, id int64) (*models.Article, er
 
 func (db *DB) ListArticlesByCompany(ctx context.Context, companyID int64) ([]*models.Article, error) {
 	query := `
-		SELECT id, company_id, title, content, source, published_at, created_at, updated_at
+		SELECT id, company_id, title, content, source, published_at, published_at_local, created_at_utc, updated_at_utc
 		FROM articles
 		WHERE company_id = $1
 		ORDER BY published_at DESC`
@@ -79,6 +82,7 @@ func (db *DB) ListArticlesByCompany(ctx context.Context, companyID int64) ([]*mo
 			&article.Content,
 			&article.Source,
 			&article.PublishedAt,
+			&article.PublishedAtLocal,
 			&article.CreatedAt,
 			&article.UpdatedAt,
 		)

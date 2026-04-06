@@ -11,7 +11,7 @@ func (db *DB) CreateCompany(ctx context.Context, company *models.Company) error 
 	query := `
 		INSERT INTO companies (name, ticker, sector, description)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at, updated_at`
+		RETURNING id, created_at_utc, updated_at_utc`
 
 	err := db.Pool.QueryRow(ctx, query,
 		company.Name,
@@ -28,7 +28,7 @@ func (db *DB) CreateCompany(ctx context.Context, company *models.Company) error 
 
 func (db *DB) GetCompanyByID(ctx context.Context, id int64) (*models.Company, error) {
 	query := `
-		SELECT id, name, ticker, sector, description, created_at, updated_at
+		SELECT id, name, ticker, sector, description, created_at_utc, updated_at_utc
 		FROM companies
 		WHERE id = $1`
 
@@ -51,7 +51,7 @@ func (db *DB) GetCompanyByID(ctx context.Context, id int64) (*models.Company, er
 
 func (db *DB) ListCompanies(ctx context.Context) ([]*models.Company, error) {
 	query := `
-		SELECT id, name, ticker, sector, description, created_at, updated_at
+		SELECT id, name, ticker, sector, description, created_at_utc, updated_at_utc
 		FROM companies
 		ORDER BY name ASC`
 
@@ -85,9 +85,9 @@ func (db *DB) ListCompanies(ctx context.Context) ([]*models.Company, error) {
 func (db *DB) UpdateCompany(ctx context.Context, company *models.Company) error {
 	query := `
 		UPDATE companies
-		SET name = $1, ticker = $2, sector = $3, description = $4, updated_at = NOW()
+		SET name = $1, ticker = $2, sector = $3, description = $4, updated_at_utc = NOW()
 		WHERE id = $5
-		RETURNING updated_at`
+		RETURNING updated_at_utc`
 
 	err := db.Pool.QueryRow(ctx, query,
 		company.Name,
