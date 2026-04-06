@@ -2,7 +2,10 @@ module omnicorp-analyst
 
 go 1.26.1
 
-require github.com/jackc/pgx/v5 v5.7.4
+require (
+	github.com/gocolly/colly/v2 v2.1.0
+	github.com/jackc/pgx/v5 v5.7.4
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
