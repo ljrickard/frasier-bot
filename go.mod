@@ -1,3 +1,1 @@
-module omnicorp-analyst
-
-go 1.21
+go mod tidy
