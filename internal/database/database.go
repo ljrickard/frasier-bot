@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,7 +19,17 @@ func New(ctx context.Context) (*DB, error) {
 		return nil, fmt.Errorf("DATABASE_URL environment variable is not set")
 	}
 
-	pool, err := pgxpool.New(ctx, connStr)
+	config, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse connection string: %w", err)
+	}
+
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "SET timezone = 'UTC'")
+		return err
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}

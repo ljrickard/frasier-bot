@@ -8,6 +8,11 @@ import (
 )
 
 func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error {
+	if article.PublishedAt != nil {
+		utc := article.PublishedAt.UTC()
+		article.PublishedAt = &utc
+	}
+
 	query := `
 		INSERT INTO articles (company_id, title, content, source, published_at)
 		VALUES ($1, $2, $3, $4, $5)

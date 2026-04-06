@@ -1,3 +1,5 @@
+SET timezone = 'UTC';
+
 CREATE TABLE IF NOT EXISTS companies (
     id          BIGSERIAL PRIMARY KEY,
     name        TEXT NOT NULL,
