@@ -51,7 +51,7 @@ func main() {
 			Source:    articles[i].Source,
 		}
 
-		if err := db.CreateArticle(ctx, a); err != nil {
+		if err := db.InsertArticle(ctx, a); err != nil {
 			log.Printf("Warning: failed to insert article %q: %v", a.Title, err)
 			continue
 		}
