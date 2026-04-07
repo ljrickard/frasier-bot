@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"omnicorp-analyst/internal/models"
 )
 
@@ -55,6 +57,10 @@ func (db *DB) InsertArticle(ctx context.Context, article *models.Article) error 
 		article.PublishedAtLocal,
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Row was skipped due to ON CONFLICT DO NOTHING
+			return nil
+		}
 		return fmt.Errorf("failed to insert article: %w", err)
 	}
 
