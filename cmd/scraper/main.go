@@ -20,7 +20,7 @@ func main() {
 	defer db.Close()
 	log.Println("Connected to database successfully.")
 
-	url := "https://www.bbc.co.uk/sport/football/live/cq8w5ll878pt"
+	url := "https://www.bbc.co.uk/sport/golf/articles/cn89zp1e38no"
 	log.Printf("Scraping articles from %s", url)
 
 	articles, err := scraper.ScrapeArticles(url)
