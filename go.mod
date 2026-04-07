@@ -1,6 +1,6 @@
 module omnicorp-analyst
 
-go 1.26.1
+go 1.23.0
 
 require (
 	github.com/gocolly/colly/v2 v2.1.0
