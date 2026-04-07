@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"omnicorp-analyst/internal/models"
 )
 
@@ -29,6 +30,33 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create article: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) InsertArticle(ctx context.Context, pool *pgxpool.Pool, article *models.Article) error {
+	if article.PublishedAt != nil {
+		local := article.PublishedAt.Format(time.RFC3339)
+		article.PublishedAtLocal = &local
+	}
+
+	query := `
+		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT DO NOTHING
+		RETURNING id, created_at_utc, updated_at_utc`
+
+	err := pool.QueryRow(ctx, query,
+		article.CompanyID,
+		article.Title,
+		article.Content,
+		article.Source,
+		article.PublishedAt,
+		article.PublishedAtLocal,
+	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to insert article: %w", err)
 	}
 
 	return nil
