@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"omnicorp-analyst/internal/models"
 )
 
@@ -35,7 +34,7 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 	return nil
 }
 
-func (db *DB) InsertArticle(ctx context.Context, pool *pgxpool.Pool, article *models.Article) error {
+func (db *DB) InsertArticle(ctx context.Context, article *models.Article) error {
 	if article.PublishedAt != nil {
 		local := article.PublishedAt.Format(time.RFC3339)
 		article.PublishedAtLocal = &local
@@ -47,7 +46,7 @@ func (db *DB) InsertArticle(ctx context.Context, pool *pgxpool.Pool, article *mo
 		ON CONFLICT DO NOTHING
 		RETURNING id, created_at_utc, updated_at_utc`
 
-	err := pool.QueryRow(ctx, query,
+	err := db.Pool.QueryRow(ctx, query,
 		article.CompanyID,
 		article.Title,
 		article.Content,

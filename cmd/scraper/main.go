@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -50,7 +51,7 @@ func main() {
 			Source:    articles[i].Source,
 		}
 
-		if err := db.InsertArticle(ctx, db.Pool, a); err != nil {
+		if err := db.InsertArticle(ctx, a); err != nil {
 			log.Printf("Warning: failed to insert article %q: %v", a.Title, err)
 			continue
 		}
