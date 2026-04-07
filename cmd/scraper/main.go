@@ -20,6 +20,11 @@ func main() {
 	defer db.Close()
 	log.Println("Connected to database successfully.")
 
+	if err := db.RunMigrations(ctx); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+	log.Println("Migrations completed successfully.")
+
 	defaultCompany := &models.Company{
 		Name:   "BBC Sport",
 		Ticker: "BBC",

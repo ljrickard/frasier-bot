@@ -44,3 +44,14 @@ func New(ctx context.Context) (*DB, error) {
 func (db *DB) Close() {
 	db.Pool.Close()
 }
+
+func (db *DB) RunMigrations(ctx context.Context) error {
+	query := `
+		ALTER TABLE companies
+		ADD CONSTRAINT companies_name_unique UNIQUE (name);
+	`
+	// Ignore error if constraint already exists
+	_, _ = db.Pool.Exec(ctx, query)
+
+	return nil
+}
