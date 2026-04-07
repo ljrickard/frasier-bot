@@ -26,6 +26,26 @@ func (db *DB) CreateCompany(ctx context.Context, company *models.Company) error 
 	return nil
 }
 
+func (db *DB) GetOrCreateCompany(ctx context.Context, company *models.Company) error {
+	query := `
+		INSERT INTO companies (name, ticker, sector, description)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id, created_at_utc, updated_at_utc`
+
+	err := db.Pool.QueryRow(ctx, query,
+		company.Name,
+		company.Ticker,
+		company.Sector,
+		company.Description,
+	).Scan(&company.ID, &company.CreatedAt, &company.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to get or create company: %w", err)
+	}
+
+	return nil
+}
+
 func (db *DB) GetCompanyByID(ctx context.Context, id int64) (*models.Company, error) {
 	query := `
 		SELECT id, name, ticker, sector, description, created_at_utc, updated_at_utc

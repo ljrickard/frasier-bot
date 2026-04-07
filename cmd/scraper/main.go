@@ -20,6 +20,15 @@ func main() {
 	defer db.Close()
 	log.Println("Connected to database successfully.")
 
+	defaultCompany := &models.Company{
+		Name:   "BBC Sport",
+		Ticker: "BBC",
+	}
+	if err := db.GetOrCreateCompany(ctx, defaultCompany); err != nil {
+		log.Fatalf("Failed to get or create default company: %v", err)
+	}
+	log.Printf("Using company id=%d name=%q", defaultCompany.ID, defaultCompany.Name)
+
 	url := "https://www.bbc.co.uk/sport/golf/articles/cn89zp1e38no"
 	log.Printf("Scraping articles from %s", url)
 
@@ -32,9 +41,10 @@ func main() {
 	saved := 0
 	for i := range articles {
 		a := &models.Article{
-			Title:   articles[i].Title,
-			Content: articles[i].Content,
-			Source:  articles[i].Source,
+			CompanyID: defaultCompany.ID,
+			Title:     articles[i].Title,
+			Content:   articles[i].Content,
+			Source:    articles[i].Source,
 		}
 
 		log.Printf("Saving article %d/%d: %q", i+1, len(articles), a.Title)
