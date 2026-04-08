@@ -45,7 +45,8 @@ func main() {
 	log.Printf("Using company id=%d name=%q", show.ID, show.Name)
 
 	// Scrape a single episode
-	url := "https://www.kacl780.net/frasier/transcripts/s01/e01/"
+	url := "https://www.kacl780.net/frasier/transcripts/season_1/episode_1/the_good_son.html"
+	// https://www.kacl780.net/frasier/transcripts/season_1/episode_1/the_good_son.html
 	seasonEp := "S01E01"
 
 	log.Printf("Scraping transcript from %s", url)
