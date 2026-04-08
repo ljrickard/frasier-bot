@@ -19,10 +19,16 @@ type EpisodeInfo struct {
 	URL          string
 }
 
-// TranscriptResult holds the extracted title and text chunks.
+// ParentChildChunk holds a parent chunk and its child snippets.
+type ParentChildChunk struct {
+	ParentContent string
+	Children      []string
+}
+
+// TranscriptResult holds the extracted title and parent-child chunks.
 type TranscriptResult struct {
 	Title  string
-	Chunks []string
+	Chunks []ParentChildChunk
 }
 
 // cleanTranscript removes navigation/header/footer lines and finds where
@@ -86,8 +92,25 @@ func chunkByWords(text string, maxWords int) []string {
 	return chunks
 }
 
+// chunkParentChild splits text into ~1500-word parent chunks, then splits
+// each parent into five ~300-word child snippets.
+func chunkParentChild(text string) []ParentChildChunk {
+	parents := chunkByWords(text, 1500)
+
+	var result []ParentChildChunk
+	for _, parent := range parents {
+		children := chunkByWords(parent, 300)
+		result = append(result, ParentChildChunk{
+			ParentContent: parent,
+			Children:      children,
+		})
+	}
+
+	return result
+}
+
 // ScrapeTranscript fetches a Frasier transcript page, extracts the body
-// inner text, cleans it, and splits it into word-based chunks.
+// inner text, cleans it, and splits it into parent-child chunks.
 func ScrapeTranscript(url string) (*TranscriptResult, error) {
 	var bodyText string
 
@@ -123,8 +146,8 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 		return nil, fmt.Errorf("no transcript text remaining after cleaning from %s", url)
 	}
 
-	// Split into 1,000-word chunks
-	chunks := chunkByWords(text, 1000)
+	// Split into parent-child chunks (1500-word parents, 300-word children)
+	chunks := chunkParentChild(text)
 
 	return &TranscriptResult{
 		Chunks: chunks,

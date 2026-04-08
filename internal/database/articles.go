@@ -24,8 +24,8 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 	}
 
 	query := `
-		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local, embedding, season, episode, episode_title, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local, embedding, season, episode, episode_title, metadata, parent_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at_utc, updated_at_utc`
 
 	err := db.Pool.QueryRow(ctx, query,
@@ -40,6 +40,7 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 		article.Episode,
 		article.EpisodeTitle,
 		article.Metadata,
+		article.ParentID,
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create article: %w", err)
@@ -163,6 +164,7 @@ type SearchResult struct {
 	Title      string
 	URL        string
 	Content    string
+	ParentID   *int64
 	Similarity float64
 }
 
@@ -170,7 +172,7 @@ func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limi
 	vec := pgvector.NewVector(queryEmbedding)
 
 	query := `
-		SELECT title, source, content, 1 - (embedding <=> $1) AS similarity
+		SELECT title, source, content, parent_id, 1 - (embedding <=> $1) AS similarity
 		FROM articles
 		WHERE embedding IS NOT NULL
 		ORDER BY embedding <=> $1
@@ -185,7 +187,7 @@ func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limi
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Title, &r.URL, &r.Content, &r.Similarity); err != nil {
+		if err := rows.Scan(&r.Title, &r.URL, &r.Content, &r.ParentID, &r.Similarity); err != nil {
 			return nil, fmt.Errorf("failed to scan search result: %w", err)
 		}
 		results = append(results, r)
@@ -203,4 +205,54 @@ func (db *DB) HasArticlesForSource(ctx context.Context, source string) (bool, er
 		return false, fmt.Errorf("failed to check articles for source: %w", err)
 	}
 	return exists, nil
+}
+
+// CreateParentChunk inserts a parent chunk and returns its ID.
+func (db *DB) CreateParentChunk(ctx context.Context, chunk *models.ParentChunk) error {
+	query := `
+		INSERT INTO parent_chunks (content, season, episode, episode_title, url)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id`
+
+	err := db.Pool.QueryRow(ctx, query,
+		chunk.Content,
+		chunk.Season,
+		chunk.Episode,
+		chunk.EpisodeTitle,
+		chunk.URL,
+	).Scan(&chunk.ID)
+	if err != nil {
+		return fmt.Errorf("failed to create parent chunk: %w", err)
+	}
+
+	return nil
+}
+
+// GetParentChunksByIDs fetches unique parent chunks by their IDs.
+func (db *DB) GetParentChunksByIDs(ctx context.Context, ids []int64) ([]models.ParentChunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	query := `
+		SELECT id, content, season, episode, episode_title, url
+		FROM parent_chunks
+		WHERE id = ANY($1)`
+
+	rows, err := db.Pool.Query(ctx, query, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get parent chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var chunks []models.ParentChunk
+	for rows.Next() {
+		var c models.ParentChunk
+		if err := rows.Scan(&c.ID, &c.Content, &c.Season, &c.Episode, &c.EpisodeTitle, &c.URL); err != nil {
+			return nil, fmt.Errorf("failed to scan parent chunk: %w", err)
+		}
+		chunks = append(chunks, c)
+	}
+
+	return chunks, nil
 }

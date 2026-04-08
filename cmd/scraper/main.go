@@ -94,31 +94,48 @@ func main() {
 		}
 
 		saved := 0
-		for i, chunk := range result.Chunks {
-			partTitle := fmt.Sprintf("%s: %s (Part %d)", seasonEp, ep.EpisodeTitle, i+1)
-
-			embedding, err := embeddings.GenerateEmbedding(ctx, chunk)
-			if err != nil {
-				log.Printf("Warning: failed to generate embedding for %s chunk %d: %v", seasonEp, i+1, err)
-				continue
-			}
-
-			a := &models.Article{
-				CompanyID:    show.ID,
-				Title:        partTitle,
-				Content:      chunk,
-				Source:       ep.URL,
-				Embedding:    embedding,
+		for i, pc := range result.Chunks {
+			// Save parent chunk first
+			parent := &models.ParentChunk{
+				Content:      pc.ParentContent,
 				Season:       ep.Season,
 				Episode:      ep.Episode,
 				EpisodeTitle: ep.EpisodeTitle,
+				URL:          ep.URL,
 			}
-
-			if err := db.CreateArticle(ctx, a); err != nil {
-				log.Printf("Warning: failed to save %s chunk %d: %v", seasonEp, i+1, err)
+			if err := db.CreateParentChunk(ctx, parent); err != nil {
+				log.Printf("Warning: failed to save parent chunk %d for %s: %v", i+1, seasonEp, err)
 				continue
 			}
-			saved++
+
+			// Save each child snippet with embedding
+			for j, child := range pc.Children {
+				partTitle := fmt.Sprintf("%s: %s (Part %d.%d)", seasonEp, ep.EpisodeTitle, i+1, j+1)
+
+				embedding, err := embeddings.GenerateEmbedding(ctx, child)
+				if err != nil {
+					log.Printf("Warning: failed to generate embedding for %s chunk %d.%d: %v", seasonEp, i+1, j+1, err)
+					continue
+				}
+
+				a := &models.Article{
+					CompanyID:    show.ID,
+					Title:        partTitle,
+					Content:      child,
+					Source:       ep.URL,
+					Embedding:    embedding,
+					Season:       ep.Season,
+					Episode:      ep.Episode,
+					EpisodeTitle: ep.EpisodeTitle,
+					ParentID:     &parent.ID,
+				}
+
+				if err := db.CreateArticle(ctx, a); err != nil {
+					log.Printf("Warning: failed to save %s chunk %d.%d: %v", seasonEp, i+1, j+1, err)
+					continue
+				}
+				saved++
+			}
 		}
 
 		fmt.Printf("Ingested S%02dE%02d: %s (%d chunks)\n", ep.Season, ep.Episode, ep.EpisodeTitle, saved)

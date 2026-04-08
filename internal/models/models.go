@@ -12,12 +12,22 @@ type Company struct {
 	UpdatedAt   time.Time `json:"updated_at_utc"`
 }
 
+type ParentChunk struct {
+	ID           int64  `json:"id"`
+	Content      string `json:"content"`
+	Season       int    `json:"season"`
+	Episode      int    `json:"episode"`
+	EpisodeTitle string `json:"episode_title"`
+	URL          string `json:"url"`
+}
+
 type Article struct {
 	ID               int64      `json:"id"`
 	CompanyID        int64      `json:"company_id"`
 	Title            string     `json:"title"`
 	Content          string     `json:"content,omitempty"`
 	Source           string     `json:"source,omitempty"`
+	ParentID         *int64     `json:"parent_id,omitempty"`
 	Season           int        `json:"season,omitempty"`
 	Episode          int        `json:"episode,omitempty"`
 	EpisodeTitle     string     `json:"episode_title,omitempty"`
