@@ -153,3 +153,37 @@ func (db *DB) DeleteArticle(ctx context.Context, id int64) error {
 
 	return nil
 }
+
+// SearchResult holds a single semantic search result.
+type SearchResult struct {
+	Title      string
+	URL        string
+	Similarity float64
+}
+
+func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limit int) ([]SearchResult, error) {
+	vec := pgvector.NewVector(queryEmbedding)
+
+	query := `
+		SELECT title, source, 1 - (embedding <=> $1) AS similarity
+		FROM articles
+		ORDER BY embedding <=> $1
+		LIMIT $2`
+
+	rows, err := db.Pool.Query(ctx, query, vec, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search articles: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		if err := rows.Scan(&r.Title, &r.URL, &r.Similarity); err != nil {
+			return nil, fmt.Errorf("failed to scan search result: %w", err)
+		}
+		results = append(results, r)
+	}
+
+	return results, nil
+}
