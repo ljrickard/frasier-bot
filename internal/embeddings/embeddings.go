@@ -19,7 +19,7 @@ func Preflight() error {
 		return fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
 	}
 	if os.Getenv("GOOGLE_CLOUD_LOCATION") == "" {
-		log.Println("GOOGLE_CLOUD_LOCATION not set, will default to us-central1")
+		log.Println("GOOGLE_CLOUD_LOCATION not set, will default to europe-west2")
 	}
 	return nil
 }
@@ -34,7 +34,7 @@ func GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = "us-central1"
+		location = "europe-west2"
 	}
 
 	endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", location)
