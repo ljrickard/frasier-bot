@@ -75,6 +75,141 @@ Question: %s`, contextBuilder.String(), query)
 	return answer, nil
 }
 
+// ClassifyQuery asks Gemini to classify a query as SPECIFIC or GENERAL.
+func ClassifyQuery(ctx context.Context, query string) (string, error) {
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
+	}
+
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = "europe-west2"
+	}
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`Classify this query as 'SPECIFIC' (asking for a name, date, or quote) or 'GENERAL' (asking for a summary or theme). Respond with only one word.
+
+Query: %s`, query)
+
+	temperature := float32(0.0)
+
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+		Temperature: &temperature,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to classify query: %w", err)
+	}
+
+	result := strings.TrimSpace(extractText(resp))
+	result = strings.ToUpper(result)
+
+	if strings.Contains(result, "SPECIFIC") {
+		return "SPECIFIC", nil
+	}
+	return "GENERAL", nil
+}
+
+// GenerateVanillaAnswer asks Gemini the question with no RAG context.
+func GenerateVanillaAnswer(ctx context.Context, query string) (string, error) {
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
+	}
+
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = "europe-west2"
+	}
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`You are a helpful assistant who is knowledgeable about the TV show Frasier. Answer the following question to the best of your ability.
+
+Question: %s`, query)
+
+	temperature := float32(0.2)
+
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+		Temperature: &temperature,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to generate vanilla answer: %w", err)
+	}
+
+	answer := extractText(resp)
+	if answer == "" {
+		return "", fmt.Errorf("empty response from model")
+	}
+
+	return answer, nil
+}
+
+// EvaluateAnswers asks Gemini to compare the vanilla and RAG answers.
+func EvaluateAnswers(ctx context.Context, query, vanillaAnswer, ragAnswer string) (string, error) {
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
+	}
+
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = "europe-west2"
+	}
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`You are an evaluator. A user asked a question about the TV show Frasier. Two AI systems answered: one with no database context ("Vanilla AI") and one with actual transcript data ("RAG AI").
+
+Question: %s
+
+Vanilla AI Answer:
+%s
+
+RAG AI Answer:
+%s
+
+Based on the RAG AI's context-grounded answer, did the Vanilla AI get anything wrong? Write a brief footnote (2-3 sentences max) comparing accuracy.`, query, vanillaAnswer, ragAnswer)
+
+	temperature := float32(0.2)
+
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+		Temperature: &temperature,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to evaluate answers: %w", err)
+	}
+
+	result := extractText(resp)
+	if result == "" {
+		return "", fmt.Errorf("empty response from model")
+	}
+
+	return result, nil
+}
+
 func extractText(resp *genai.GenerateContentResponse) string {
 	if resp == nil || len(resp.Candidates) == 0 {
 		return ""
