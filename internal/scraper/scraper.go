@@ -170,24 +170,41 @@ func (s *Scraper) ScrapeTranscript(url string) (*TranscriptResult, error) {
 	}, nil
 }
 
-// isAllowedLink returns true if the link is relative or belongs to kacl780.net.
-func isAllowedLink(rawHref, absoluteHref string) bool {
-	// Relative links (start with . or / but not //)
+// isAllowedLink returns true only if the link is safe to follow.
+// It rejects geocities, archive.org, wstub, and any other external links.
+func isAllowedLink(rawHref string) bool {
+	lower := strings.ToLower(rawHref)
+
+	// Block known bad domains
+	if strings.Contains(lower, "geocities") ||
+		strings.Contains(lower, "archive.org") ||
+		strings.Contains(lower, "wstub") {
+		return false
+	}
+
+	// Allow relative links
 	if strings.HasPrefix(rawHref, "./") || strings.HasPrefix(rawHref, "../") {
+		return true
+	}
+	if strings.HasPrefix(rawHref, "episode_") || strings.HasPrefix(rawHref, "season_") {
 		return true
 	}
 	if strings.HasPrefix(rawHref, "/") && !strings.HasPrefix(rawHref, "//") {
 		return true
 	}
-	// Bare filenames (no scheme, no slash prefix)
-	if !strings.Contains(rawHref, "://") && !strings.HasPrefix(rawHref, "//") {
+
+	// Allow kacl780.net absolute links
+	if strings.Contains(lower, "kacl780.net") {
 		return true
 	}
-	// Absolute links must be kacl780.net
-	if strings.Contains(absoluteHref, "kacl780.net") {
-		return true
+
+	// Block everything else (external links)
+	if strings.Contains(rawHref, "://") || strings.HasPrefix(rawHref, "//") {
+		return false
 	}
-	return false
+
+	// Bare relative filenames are ok
+	return true
 }
 
 // DiscoverEpisodes crawls the root transcripts page, finds all season pages,
@@ -196,26 +213,26 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	var episodes []EpisodeInfo
 	var seasonURLs []string
 
+	seasonRe := regexp.MustCompile(`/season_(\d+)/?$`)
+
 	rootCollector := colly.NewCollector()
 	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		rawHref := e.Attr("href")
-		if strings.Contains(rawHref, "geocities") || strings.Contains(rawHref, "archive.org") {
+		if !isAllowedLink(rawHref) {
 			return
 		}
 		href := e.Request.AbsoluteURL(rawHref)
-		if !isAllowedLink(rawHref, href) {
+		if !seasonRe.MatchString(href) {
 			return
 		}
-		if strings.Contains(href, "season_") {
-			for _, u := range seasonURLs {
-				if u == href {
-					return
-				}
+		for _, u := range seasonURLs {
+			if u == href {
+				return
 			}
-			seasonURLs = append(seasonURLs, href)
 		}
+		seasonURLs = append(seasonURLs, href)
 	})
 
 	s.logger.Printf("Discovering episodes from %s", RootURL)
@@ -225,8 +242,6 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	}
 	rootCollector.Wait()
 
-	s.logger.Printf("Found %d seasons", len(seasonURLs))
-
 	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
 
 	for _, seasonURL := range seasonURLs {
@@ -235,13 +250,10 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 
 		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 			rawHref := e.Attr("href")
-			if strings.Contains(rawHref, "geocities") || strings.Contains(rawHref, "archive.org") {
+			if !isAllowedLink(rawHref) {
 				return
 			}
 			href := e.Request.AbsoluteURL(rawHref)
-			if !isAllowedLink(rawHref, href) {
-				return
-			}
 
 			if !strings.HasSuffix(href, ".html") {
 				return
@@ -282,7 +294,7 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonCollector.Wait()
 	}
 
-	s.logger.Printf("Discovered %d episodes total", len(episodes))
+	s.logger.Printf("Found %d seasons and %d episodes total", len(seasonURLs), len(episodes))
 	return episodes, nil
 }
 
