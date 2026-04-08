@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"omnicorp-analyst/internal/ai"
 	"omnicorp-analyst/internal/database"
 	"omnicorp-analyst/internal/embeddings"
 )
@@ -40,7 +41,7 @@ func main() {
 	}
 
 	// Search articles
-	results, err := db.SearchArticles(ctx, queryEmbedding, 10)
+	results, err := db.SearchArticles(ctx, queryEmbedding, 3)
 	if err != nil {
 		log.Fatalf("Failed to search articles: %v", err)
 	}
@@ -66,5 +67,23 @@ func main() {
 
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("  %d result(s) returned\n", len(results))
+	fmt.Println(strings.Repeat("=", 80))
+
+	fmt.Println()
+
+	// Generate AI answer using retrieved articles
+	log.Println("Generating AI answer...")
+	answer, err := ai.GenerateAnswer(ctx, query, results)
+	if err != nil {
+		log.Fatalf("Failed to generate answer: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println("  AI-Generated Answer")
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println()
+	fmt.Println(answer)
+	fmt.Println()
 	fmt.Println(strings.Repeat("=", 80))
 }
