@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultLocation = "europe-west2"
-	geminiModel     = "gemini-1.5-flash"
+	geminiModel     = "gemini-2.5-flash"
 )
 
 // GenerateAnswer takes a user query and a slice of search results,
