@@ -188,8 +188,6 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	var episodes []EpisodeInfo
 	var seasonURLs []string
 
-	// Strict season pattern: /frasier/transcripts/season_XX/
-	seasonRe := regexp.MustCompile(`/frasier/transcripts/season_(\d{1,2})/?$`)
 	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
 
 	// --- Phase 1: Discover seasons ---
@@ -198,18 +196,21 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 
 	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		rawHref := e.Attr("href")
+		linkText := e.Text
 
-		// During season discovery, skip anything with episode_ in it
+		// Check if href or link text contains "season" (case-insensitive)
+		if !strings.Contains(strings.ToLower(rawHref), "season") &&
+			!strings.Contains(strings.ToLower(linkText), "season") {
+			return
+		}
+
+		// Skip anything that looks like an episode link
 		if strings.Contains(rawHref, "episode_") {
 			return
 		}
 
+		// Resolve to absolute URL
 		href := e.Request.AbsoluteURL(rawHref)
-
-		// Must match strict season pattern
-		if !seasonRe.MatchString(href) {
-			return
-		}
 
 		// Deduplicate
 		for _, u := range seasonURLs {
@@ -217,7 +218,9 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 				return
 			}
 		}
+
 		seasonURLs = append(seasonURLs, href)
+		s.logger.Printf("Confirmed Season found: %s", href)
 	})
 
 	s.logger.Printf("Discovering seasons from %s", RootURL)
