@@ -43,6 +43,7 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 		contextBuilder.WriteString(fmt.Sprintf("Article %d:\n", i+1))
 		contextBuilder.WriteString(fmt.Sprintf("Title: %s\n", a.Title))
 		contextBuilder.WriteString(fmt.Sprintf("URL: %s\n", a.URL))
+		contextBuilder.WriteString(fmt.Sprintf("Content: %s\n", a.Content))
 		contextBuilder.WriteString(fmt.Sprintf("Similarity: %.4f\n", a.Similarity))
 		contextBuilder.WriteString("\n")
 	}

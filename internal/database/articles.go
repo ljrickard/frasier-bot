@@ -158,6 +158,7 @@ func (db *DB) DeleteArticle(ctx context.Context, id int64) error {
 type SearchResult struct {
 	Title      string
 	URL        string
+	Content    string
 	Similarity float64
 }
 
@@ -165,7 +166,7 @@ func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limi
 	vec := pgvector.NewVector(queryEmbedding)
 
 	query := `
-		SELECT title, source, 1 - (embedding <=> $1) AS similarity
+		SELECT title, source, content, 1 - (embedding <=> $1) AS similarity
 		FROM articles
 		WHERE embedding IS NOT NULL
 		ORDER BY embedding <=> $1
@@ -180,7 +181,7 @@ func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limi
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Title, &r.URL, &r.Similarity); err != nil {
+		if err := rows.Scan(&r.Title, &r.URL, &r.Content, &r.Similarity); err != nil {
 			return nil, fmt.Errorf("failed to scan search result: %w", err)
 		}
 		results = append(results, r)
