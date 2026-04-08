@@ -87,5 +87,11 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 		return fmt.Errorf("failed to create articles table: %w", err)
 	}
 
+	// Add new columns for series metadata (idempotent)
+	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS season INTEGER`)
+	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS episode INTEGER`)
+	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS episode_title TEXT`)
+	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS metadata JSONB`)
+
 	return nil
 }

@@ -2,10 +2,22 @@ package scraper
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gocolly/colly/v2"
 )
+
+const RootURL = "https://www.kacl780.net/frasier/transcripts/"
+
+// EpisodeInfo holds metadata about a discovered episode.
+type EpisodeInfo struct {
+	Season       int
+	Episode      int
+	EpisodeTitle string
+	URL          string
+}
 
 // TranscriptResult holds the extracted title and text chunks.
 type TranscriptResult struct {
@@ -115,7 +127,73 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 	chunks := chunkByWords(text, 1000)
 
 	return &TranscriptResult{
-		Title:  "The Good Son",
 		Chunks: chunks,
 	}, nil
+}
+
+// DiscoverEpisodes crawls the root transcripts page, finds all season pages,
+// then finds all episode links within each season page.
+func DiscoverEpisodes() ([]EpisodeInfo, error) {
+	var episodes []EpisodeInfo
+
+	seasonRe := regexp.MustCompile(`/season_(\d+)/?$`)
+	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
+
+	seasonCollector := colly.NewCollector()
+	seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+	episodeCollector := colly.NewCollector()
+	episodeCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+	// On the main transcripts page, find season links
+	seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		href := e.Request.AbsoluteURL(e.Attr("href"))
+		if seasonRe.MatchString(href) {
+			episodeCollector.Visit(href)
+		}
+	})
+
+	// On each season page, find episode links
+	episodeCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		href := e.Request.AbsoluteURL(e.Attr("href"))
+		matches := episodeRe.FindStringSubmatch(href)
+		if matches == nil {
+			return
+		}
+
+		season, _ := strconv.Atoi(matches[1])
+		episode, _ := strconv.Atoi(matches[2])
+		rawTitle := matches[3]
+
+		title := formatTitle(rawTitle)
+
+		episodes = append(episodes, EpisodeInfo{
+			Season:       season,
+			Episode:      episode,
+			EpisodeTitle: title,
+			URL:          href,
+		})
+	})
+
+	err := seasonCollector.Visit(RootURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to visit root URL %s: %w", RootURL, err)
+	}
+
+	seasonCollector.Wait()
+	episodeCollector.Wait()
+
+	return episodes, nil
+}
+
+// formatTitle converts a filename slug like "the_good_son" to "The Good Son".
+func formatTitle(slug string) string {
+	slug = strings.ReplaceAll(slug, "_", " ")
+	words := strings.Fields(slug)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }

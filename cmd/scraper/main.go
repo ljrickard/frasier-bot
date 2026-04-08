@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 
 	"omnicorp-analyst/internal/database"
 	"omnicorp-analyst/internal/embeddings"
@@ -44,43 +45,85 @@ func main() {
 	}
 	log.Printf("Using company id=%d name=%q", show.ID, show.Name)
 
-	// Scrape a single episode
-	url := "https://www.kacl780.net/frasier/transcripts/season_1/episode_1/the_good_son.html"
-	seasonEp := "S01E01"
-
-	log.Printf("Scraping transcript from %s", url)
-	result, err := scraper.ScrapeTranscript(url)
-	if err != nil {
-		log.Fatalf("Failed to scrape transcript: %v", err)
+	// Discover all episodes
+	log.Printf("Discovering episodes from %s", scraper.RootURL)
+	if scraper.RootURL == "" {
+		log.Fatalf("scraper.RootURL is not set")
 	}
-	log.Printf("Extracted title: %q with %d chunks", result.Title, len(result.Chunks))
+	episodes, err := scraper.DiscoverEpisodes()
+	if err != nil {
+		log.Fatalf("Failed to discover episodes: %v", err)
+	}
+	log.Printf("Discovered %d episodes", len(episodes))
 
-	saved := 0
-	for i, chunk := range result.Chunks {
-		partTitle := fmt.Sprintf("%s: %s (Part %d)", seasonEp, result.Title, i+1)
+	if len(episodes) == 0 {
+		log.Fatalf("No episodes discovered. Check the root URL: %s", scraper.RootURL)
+	}
 
-		log.Printf("Generating embedding for chunk %d/%d: %q", i+1, len(result.Chunks), partTitle)
-		embedding, err := embeddings.GenerateEmbedding(ctx, chunk)
+	// Sort by season then episode
+	sort.Slice(episodes, func(i, j int) bool {
+		if episodes[i].Season != episodes[j].Season {
+			return episodes[i].Season < episodes[j].Season
+		}
+		return episodes[i].Episode < episodes[j].Episode
+	})
+
+	totalIngested := 0
+	totalSkipped := 0
+
+	for _, ep := range episodes {
+		seasonEp := fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
+
+		// Check if we already have articles for this URL
+		exists, err := db.HasArticlesForSource(ctx, ep.URL)
 		if err != nil {
-			log.Fatalf("Failed to generate embedding for chunk %d: %v", i+1, err)
-		}
-
-		a := &models.Article{
-			CompanyID: show.ID,
-			Title:     partTitle,
-			Content:   chunk,
-			Source:    url,
-			Embedding: embedding,
-		}
-
-		log.Printf("Saving chunk %d/%d: %q", i+1, len(result.Chunks), partTitle)
-		if err := db.CreateArticle(ctx, a); err != nil {
-			log.Printf("Warning: failed to save chunk %d: %v", i+1, err)
+			log.Printf("Warning: failed to check existing articles for %s: %v", ep.URL, err)
 			continue
 		}
-		saved++
-		log.Printf("Saved article id=%d title=%q", a.ID, a.Title)
+		if exists {
+			log.Printf("Skipping %s: %s (already ingested)", seasonEp, ep.EpisodeTitle)
+			totalSkipped++
+			continue
+		}
+
+		log.Printf("Scraping %s: %s from %s", seasonEp, ep.EpisodeTitle, ep.URL)
+		result, err := scraper.ScrapeTranscript(ep.URL)
+		if err != nil {
+			log.Printf("Warning: failed to scrape %s: %v", seasonEp, err)
+			continue
+		}
+
+		saved := 0
+		for i, chunk := range result.Chunks {
+			partTitle := fmt.Sprintf("%s: %s (Part %d)", seasonEp, ep.EpisodeTitle, i+1)
+
+			embedding, err := embeddings.GenerateEmbedding(ctx, chunk)
+			if err != nil {
+				log.Printf("Warning: failed to generate embedding for %s chunk %d: %v", seasonEp, i+1, err)
+				continue
+			}
+
+			a := &models.Article{
+				CompanyID:    show.ID,
+				Title:        partTitle,
+				Content:      chunk,
+				Source:       ep.URL,
+				Embedding:    embedding,
+				Season:       ep.Season,
+				Episode:      ep.Episode,
+				EpisodeTitle: ep.EpisodeTitle,
+			}
+
+			if err := db.CreateArticle(ctx, a); err != nil {
+				log.Printf("Warning: failed to save %s chunk %d: %v", seasonEp, i+1, err)
+				continue
+			}
+			saved++
+		}
+
+		fmt.Printf("Ingested S%02dE%02d: %s (%d chunks)\n", ep.Season, ep.Episode, ep.EpisodeTitle, saved)
+		totalIngested++
 	}
 
-	log.Printf("Done. Saved %d/%d chunks to the database.", saved, len(result.Chunks))
+	log.Printf("Done. Ingested %d episodes, skipped %d already-ingested episodes.", totalIngested, totalSkipped)
 }

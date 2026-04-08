@@ -24,8 +24,8 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 	}
 
 	query := `
-		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local, embedding)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local, embedding, season, episode, episode_title, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at_utc, updated_at_utc`
 
 	err := db.Pool.QueryRow(ctx, query,
@@ -36,6 +36,10 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 		article.PublishedAt,
 		article.PublishedAtLocal,
 		embedding,
+		article.Season,
+		article.Episode,
+		article.EpisodeTitle,
+		article.Metadata,
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create article: %w", err)
@@ -188,4 +192,15 @@ func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limi
 	}
 
 	return results, nil
+}
+
+// HasArticlesForSource checks if any articles already exist for a given source URL.
+func (db *DB) HasArticlesForSource(ctx context.Context, source string) (bool, error) {
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM articles WHERE source = $1)`
+	err := db.Pool.QueryRow(ctx, query, source).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check articles for source: %w", err)
+	}
+	return exists, nil
 }
