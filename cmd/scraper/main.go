@@ -70,6 +70,15 @@ func main() {
 		logger.Fatalf("No episodes discovered. Check the root URL: %s", scraper.RootURL)
 	}
 
+	// Count unique seasons
+	seasonSet := make(map[int]bool)
+	for _, ep := range episodes {
+		seasonSet[ep.Season] = true
+	}
+	if len(seasonSet) != 11 {
+		logger.Printf("WARNING: Expected 11 seasons but found %d. Seasons present: %v", len(seasonSet), seasonSet)
+	}
+
 	sort.Slice(episodes, func(i, j int) bool {
 		if episodes[i].Season != episodes[j].Season {
 			return episodes[i].Season < episodes[j].Season

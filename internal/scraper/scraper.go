@@ -170,27 +170,16 @@ func (s *Scraper) ScrapeTranscript(url string) (*TranscriptResult, error) {
 	}, nil
 }
 
-// isAllowedEpisodeLink returns true if the link is a valid episode link.
-// It blocks known bad domains and requires absolute links to be from kacl780.net.
-func isAllowedEpisodeLink(rawHref string) bool {
-	lower := strings.ToLower(rawHref)
-
-	// Block known bad domains/paths
-	if strings.Contains(lower, "geocities") ||
-		strings.Contains(lower, "archive.org") ||
-		strings.Contains(lower, "wstub") ||
-		strings.Contains(lower, "index.html") ||
-		strings.Contains(lower, "about.html") {
-		return false
+// isBlockedLink returns true if the URL contains any known bad domain/path.
+func isBlockedLink(href string) bool {
+	lower := strings.ToLower(href)
+	blocked := []string{"geocities", "archive.org", "wstub", "index.html", "about.html"}
+	for _, b := range blocked {
+		if strings.Contains(lower, b) {
+			return true
+		}
 	}
-
-	// If it starts with http, it must be kacl780.net
-	if strings.HasPrefix(lower, "http") {
-		return strings.Contains(lower, "kacl780.net")
-	}
-
-	// Relative links are assumed valid
-	return true
+	return false
 }
 
 // DiscoverEpisodes crawls the root transcripts page, finds all season pages,
@@ -199,26 +188,26 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	var episodes []EpisodeInfo
 	var seasonURLs []string
 
-	seasonRe := regexp.MustCompile(`season_(\d+)`)
+	// Strict season pattern: /frasier/transcripts/season_XX/
+	seasonRe := regexp.MustCompile(`/frasier/transcripts/season_(\d{1,2})/?$`)
 	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
 
+	// --- Phase 1: Discover seasons ---
 	rootCollector := colly.NewCollector()
 	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		rawHref := e.Attr("href")
-		href := e.Request.AbsoluteURL(rawHref)
 
-		s.logger.Printf("Found potential link: %s", href)
-
-		// Accept if the raw href or resolved URL contains season_N
-		if !seasonRe.MatchString(rawHref) && !seasonRe.MatchString(href) {
+		// During season discovery, skip anything with episode_ in it
+		if strings.Contains(rawHref, "episode_") {
 			return
 		}
 
-		// Block known bad domains on absolute links
-		lower := strings.ToLower(rawHref)
-		if strings.HasPrefix(lower, "http") && !strings.Contains(lower, "kacl780.net") {
+		href := e.Request.AbsoluteURL(rawHref)
+
+		// Must match strict season pattern
+		if !seasonRe.MatchString(href) {
 			return
 		}
 
@@ -231,30 +220,48 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonURLs = append(seasonURLs, href)
 	})
 
-	s.logger.Printf("Discovering episodes from %s", RootURL)
+	s.logger.Printf("Discovering seasons from %s", RootURL)
 	err := rootCollector.Visit(RootURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to visit root URL %s: %w", RootURL, err)
 	}
 	rootCollector.Wait()
 
+	s.logger.Printf("Found %d seasons", len(seasonURLs))
+
+	// --- Phase 2: Discover episodes within each season ---
 	for _, seasonURL := range seasonURLs {
 		seasonCollector := colly.NewCollector()
 		seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 			rawHref := e.Attr("href")
-			href := e.Request.AbsoluteURL(rawHref)
 
-			s.logger.Printf("Found potential link: %s", href)
-
-			// Must end in .html
-			if !strings.HasSuffix(href, ".html") {
+			// Must contain episode_
+			if !strings.Contains(rawHref, "episode_") {
 				return
 			}
 
-			// Apply episode link filter
-			if !isAllowedEpisodeLink(rawHref) {
+			// Must end in .html
+			if !strings.HasSuffix(rawHref, ".html") {
+				return
+			}
+
+			// Block known bad links
+			if isBlockedLink(rawHref) {
+				return
+			}
+
+			// Resolve relative URLs against the season page
+			href := e.Request.AbsoluteURL(rawHref)
+
+			// If it's an absolute link, it must be kacl780.net
+			if strings.HasPrefix(strings.ToLower(rawHref), "http") && !strings.Contains(strings.ToLower(rawHref), "kacl780.net") {
+				return
+			}
+
+			// Block resolved URL too
+			if isBlockedLink(href) {
 				return
 			}
 
@@ -291,7 +298,7 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonCollector.Wait()
 	}
 
-	s.logger.Printf("Found %d seasons and %d episodes total", len(seasonURLs), len(episodes))
+	s.logger.Printf("Validated: %d Seasons found. Total unique Episodes found: %d", len(seasonURLs), len(episodes))
 	return episodes, nil
 }
 
