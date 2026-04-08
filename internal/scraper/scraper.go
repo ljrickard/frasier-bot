@@ -170,6 +170,26 @@ func (s *Scraper) ScrapeTranscript(url string) (*TranscriptResult, error) {
 	}, nil
 }
 
+// isAllowedLink returns true if the link is relative or belongs to kacl780.net.
+func isAllowedLink(rawHref, absoluteHref string) bool {
+	// Relative links (start with . or / but not //)
+	if strings.HasPrefix(rawHref, "./") || strings.HasPrefix(rawHref, "../") {
+		return true
+	}
+	if strings.HasPrefix(rawHref, "/") && !strings.HasPrefix(rawHref, "//") {
+		return true
+	}
+	// Bare filenames (no scheme, no slash prefix)
+	if !strings.Contains(rawHref, "://") && !strings.HasPrefix(rawHref, "//") {
+		return true
+	}
+	// Absolute links must be kacl780.net
+	if strings.Contains(absoluteHref, "kacl780.net") {
+		return true
+	}
+	return false
+}
+
 // DiscoverEpisodes crawls the root transcripts page, finds all season pages,
 // then finds all episode links within each season page.
 func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
@@ -180,7 +200,14 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		href := e.Request.AbsoluteURL(e.Attr("href"))
+		rawHref := e.Attr("href")
+		if strings.Contains(rawHref, "geocities") || strings.Contains(rawHref, "archive.org") {
+			return
+		}
+		href := e.Request.AbsoluteURL(rawHref)
+		if !isAllowedLink(rawHref, href) {
+			return
+		}
 		if strings.Contains(href, "season_") {
 			for _, u := range seasonURLs {
 				if u == href {
@@ -207,7 +234,14 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-			href := e.Request.AbsoluteURL(e.Attr("href"))
+			rawHref := e.Attr("href")
+			if strings.Contains(rawHref, "geocities") || strings.Contains(rawHref, "archive.org") {
+				return
+			}
+			href := e.Request.AbsoluteURL(rawHref)
+			if !isAllowedLink(rawHref, href) {
+				return
+			}
 
 			if !strings.HasSuffix(href, ".html") {
 				return
