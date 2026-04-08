@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"omnicorp-analyst/internal/database"
 	"omnicorp-analyst/internal/embeddings"
 	"omnicorp-analyst/internal/models"
 	"omnicorp-analyst/internal/scraper"
 )
+
+const numWorkers = 5
+
+type job struct {
+	episode scraper.EpisodeInfo
+}
 
 func main() {
 	ctx := context.Background()
@@ -68,13 +77,11 @@ func main() {
 		return episodes[i].Episode < episodes[j].Episode
 	})
 
-	totalIngested := 0
+	// Filter out already-ingested episodes
+	var toIngest []scraper.EpisodeInfo
 	totalSkipped := 0
-
 	for _, ep := range episodes {
 		seasonEp := fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
-
-		// Check if we already have articles for this URL
 		exists, err := db.HasArticlesForSource(ctx, ep.URL)
 		if err != nil {
 			log.Printf("Warning: failed to check existing articles for %s: %v", ep.URL, err)
@@ -85,11 +92,53 @@ func main() {
 			totalSkipped++
 			continue
 		}
+		toIngest = append(toIngest, ep)
+	}
 
-		log.Printf("Scraping %s: %s from %s", seasonEp, ep.EpisodeTitle, ep.URL)
+	log.Printf("Episodes to ingest: %d, already skipped: %d", len(toIngest), totalSkipped)
+
+	if len(toIngest) == 0 {
+		log.Println("Nothing to ingest. Done.")
+		return
+	}
+
+	// Create jobs channel
+	jobs := make(chan job, len(toIngest))
+	for _, ep := range toIngest {
+		jobs <- job{episode: ep}
+	}
+	close(jobs)
+
+	// Counters
+	var totalIngested atomic.Int64
+
+	// Worker pool
+	var wg sync.WaitGroup
+	for w := 1; w <= numWorkers; w++ {
+		wg.Add(1)
+		go worker(ctx, w, db, show.ID, jobs, &wg, &totalIngested)
+	}
+
+	wg.Wait()
+
+	log.Printf("Done. Ingested %d episodes, skipped %d already-ingested episodes.", totalIngested.Load(), totalSkipped)
+}
+
+func worker(ctx context.Context, id int, db *database.DB, companyID int64, jobs <-chan job, wg *sync.WaitGroup, totalIngested *atomic.Int64) {
+	defer wg.Done()
+
+	for j := range jobs {
+		ep := j.episode
+		seasonEp := fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
+
+		log.Printf("[Worker %d] Scraping %s: %s from %s", id, seasonEp, ep.EpisodeTitle, ep.URL)
+
+		// Be polite to the host
+		time.Sleep(500 * time.Millisecond)
+
 		result, err := scraper.ScrapeTranscript(ep.URL)
 		if err != nil {
-			log.Printf("Warning: failed to scrape %s: %v", seasonEp, err)
+			log.Printf("[Worker %d] Warning: failed to scrape %s: %v", id, seasonEp, err)
 			continue
 		}
 
@@ -104,22 +153,22 @@ func main() {
 				URL:          ep.URL,
 			}
 			if err := db.CreateParentChunk(ctx, parent); err != nil {
-				log.Printf("Warning: failed to save parent chunk %d for %s: %v", i+1, seasonEp, err)
+				log.Printf("[Worker %d] Warning: failed to save parent chunk %d for %s: %v", id, i+1, seasonEp, err)
 				continue
 			}
 
 			// Save each child snippet with embedding
-			for j, child := range pc.Children {
-				partTitle := fmt.Sprintf("%s: %s (Part %d.%d)", seasonEp, ep.EpisodeTitle, i+1, j+1)
+			for k, child := range pc.Children {
+				partTitle := fmt.Sprintf("%s: %s (Part %d.%d)", seasonEp, ep.EpisodeTitle, i+1, k+1)
 
 				embedding, err := embeddings.GenerateEmbedding(ctx, child)
 				if err != nil {
-					log.Printf("Warning: failed to generate embedding for %s chunk %d.%d: %v", seasonEp, i+1, j+1, err)
+					log.Printf("[Worker %d] Warning: failed to generate embedding for %s chunk %d.%d: %v", id, seasonEp, i+1, k+1, err)
 					continue
 				}
 
 				a := &models.Article{
-					CompanyID:    show.ID,
+					CompanyID:    companyID,
 					Title:        partTitle,
 					Content:      child,
 					Source:       ep.URL,
@@ -131,16 +180,14 @@ func main() {
 				}
 
 				if err := db.CreateArticle(ctx, a); err != nil {
-					log.Printf("Warning: failed to save %s chunk %d.%d: %v", seasonEp, i+1, j+1, err)
+					log.Printf("[Worker %d] Warning: failed to save %s chunk %d.%d: %v", id, seasonEp, i+1, k+1, err)
 					continue
 				}
 				saved++
 			}
 		}
 
-		fmt.Printf("Ingested S%02dE%02d: %s (%d chunks)\n", ep.Season, ep.Episode, ep.EpisodeTitle, saved)
-		totalIngested++
+		fmt.Printf("[Worker %d] Ingested S%02dE%02d: %s (%d chunks)\n", id, ep.Season, ep.Episode, ep.EpisodeTitle, saved)
+		totalIngested.Add(1)
 	}
-
-	log.Printf("Done. Ingested %d episodes, skipped %d already-ingested episodes.", totalIngested, totalSkipped)
 }

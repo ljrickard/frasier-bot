@@ -24,6 +24,8 @@ func New(ctx context.Context) (*DB, error) {
 		return nil, fmt.Errorf("failed to parse connection string: %w", err)
 	}
 
+	config.MaxConns = 10
+
 	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		_, err := conn.Exec(ctx, "SET timezone = 'UTC'")
 		return err
