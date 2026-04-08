@@ -170,18 +170,6 @@ func (s *Scraper) ScrapeTranscript(url string) (*TranscriptResult, error) {
 	}, nil
 }
 
-// isBlockedLink returns true if the URL contains any known bad domain/path.
-func isBlockedLink(href string) bool {
-	lower := strings.ToLower(href)
-	blocked := []string{"geocities", "archive.org", "wstub", "index.html", "about.html"}
-	for _, b := range blocked {
-		if strings.Contains(lower, b) {
-			return true
-		}
-	}
-	return false
-}
-
 // DiscoverEpisodes crawls the root transcripts page, finds all season pages,
 // then finds all episode links within each season page.
 func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
@@ -194,82 +182,94 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	rootCollector := colly.NewCollector()
 	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		rawHref := e.Attr("href")
-		linkText := e.Text
+	var rootBody string
 
-		// Check if href or link text contains "season" (case-insensitive)
-		if !strings.Contains(strings.ToLower(rawHref), "season") &&
-			!strings.Contains(strings.ToLower(linkText), "season") {
-			return
-		}
-
-		// Skip anything that looks like an episode link
-		if strings.Contains(rawHref, "episode_") {
-			return
-		}
-
-		// Resolve to absolute URL
-		href := e.Request.AbsoluteURL(rawHref)
-
-		// Deduplicate
-		for _, u := range seasonURLs {
-			if u == href {
-				return
-			}
-		}
-
-		seasonURLs = append(seasonURLs, href)
-		s.logger.Printf("Confirmed Season found: %s", href)
+	rootCollector.OnHTML("body", func(e *colly.HTMLElement) {
+		rootBody = e.Text
 	})
 
-	s.logger.Printf("Discovering seasons from %s", RootURL)
+	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		rawHref := strings.TrimSpace(e.Attr("href"))
+		linkText := strings.TrimSpace(e.Text)
+
+		if strings.Contains(strings.ToLower(rawHref), "season") ||
+			strings.Contains(strings.ToLower(linkText), "season") {
+
+			href := e.Request.AbsoluteURL(rawHref)
+			if href == "" {
+				return
+			}
+
+			// Deduplicate
+			for _, u := range seasonURLs {
+				if u == href {
+					return
+				}
+			}
+
+			seasonURLs = append(seasonURLs, href)
+			s.logger.Printf("Found Season: %s", href)
+		}
+	})
+
+	s.logger.Printf("Visiting root: %s", RootURL)
 	err := rootCollector.Visit(RootURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to visit root URL %s: %w", RootURL, err)
 	}
 	rootCollector.Wait()
 
-	s.logger.Printf("Found %d seasons", len(seasonURLs))
+	// If no seasons found, dump the page body for debugging
+	if len(seasonURLs) == 0 {
+		s.logger.Printf("WARNING: Found 0 seasons. Root page body:\n%s", rootBody)
+		return nil, fmt.Errorf("no seasons found at %s", RootURL)
+	}
+
+	s.logger.Printf("Found %d season URLs", len(seasonURLs))
 
 	// --- Phase 2: Discover episodes within each season ---
+	blocked := []string{"geocities", "archive", "wstub", "index", "about"}
+
 	for _, seasonURL := range seasonURLs {
 		seasonCollector := colly.NewCollector()
 		seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-			rawHref := e.Attr("href")
-
-			// Must contain episode_
-			if !strings.Contains(rawHref, "episode_") {
-				return
-			}
+			rawHref := strings.TrimSpace(e.Attr("href"))
+			lower := strings.ToLower(rawHref)
 
 			// Must end in .html
-			if !strings.HasSuffix(rawHref, ".html") {
+			if !strings.HasSuffix(lower, ".html") {
 				return
 			}
 
-			// Block known bad links
-			if isBlockedLink(rawHref) {
-				return
+			// Check against blocked words
+			for _, b := range blocked {
+				if strings.Contains(lower, b) {
+					return
+				}
 			}
 
-			// Resolve relative URLs against the season page
+			// Resolve to absolute URL
 			href := e.Request.AbsoluteURL(rawHref)
-
-			// If it's an absolute link, it must be kacl780.net
-			if strings.HasPrefix(strings.ToLower(rawHref), "http") && !strings.Contains(strings.ToLower(rawHref), "kacl780.net") {
+			if href == "" {
 				return
 			}
 
-			// Block resolved URL too
-			if isBlockedLink(href) {
-				return
+			// Also check resolved URL against blocked words
+			resolvedLower := strings.ToLower(href)
+			for _, b := range blocked {
+				if strings.Contains(resolvedLower, b) {
+					return
+				}
 			}
 
+			s.logger.Printf("Found Episode: %s", href)
+
+			// Try to extract season/episode/title from URL
 			matches := episodeRe.FindStringSubmatch(href)
 			if matches == nil {
+				s.logger.Printf("WARN: Could not parse season/episode from: %s", href)
 				return
 			}
 
