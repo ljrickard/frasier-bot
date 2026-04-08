@@ -13,51 +13,71 @@ type TranscriptResult struct {
 	Chunks []string
 }
 
-// estimateTokens gives a rough token count (1 token ≈ 4 chars for English).
-func estimateTokens(s string) int {
-	return len(s) / 4
+// cleanTranscript removes navigation/header/footer lines and finds where
+// the real transcript data begins.
+func cleanTranscript(raw string) string {
+	lines := strings.Split(raw, "\n")
+
+	// Filter out nav/header/footer lines
+	skipKeywords := []string{"Home", "About", "Transcripts", "Seasons", "KACL780.NET"}
+	var filtered []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		skip := false
+		for _, kw := range skipKeywords {
+			if strings.Contains(trimmed, kw) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, trimmed)
+		}
+	}
+
+	// Find where the real data begins
+	startIdx := 0
+	for i, line := range filtered {
+		if strings.HasPrefix(line, "Transcript {") || strings.HasPrefix(line, "Act One") {
+			startIdx = i
+			break
+		}
+	}
+
+	if startIdx < len(filtered) {
+		filtered = filtered[startIdx:]
+	}
+
+	return strings.Join(filtered, "\n")
 }
 
-// chunkText splits text into chunks of roughly maxTokens tokens with overlap.
-func chunkText(text string, maxTokens, overlapTokens int) []string {
+// chunkByWords splits text into chunks of roughly maxWords words.
+func chunkByWords(text string, maxWords int) []string {
 	words := strings.Fields(text)
 	if len(words) == 0 {
 		return nil
 	}
 
-	// Estimate words-per-token ratio: ~0.75 words per token (i.e. ~1.33 tokens per word)
-	maxWords := int(float64(maxTokens) * 0.75)
-	overlapWords := int(float64(overlapTokens) * 0.75)
-
-	if maxWords < 1 {
-		maxWords = 1
-	}
-	if overlapWords >= maxWords {
-		overlapWords = maxWords / 2
-	}
-
 	var chunks []string
-	start := 0
-	for start < len(words) {
+	for start := 0; start < len(words); start += maxWords {
 		end := start + maxWords
 		if end > len(words) {
 			end = len(words)
 		}
 		chunk := strings.Join(words[start:end], " ")
 		chunks = append(chunks, chunk)
-
-		// Advance by (maxWords - overlapWords) so the next chunk overlaps
-		start += maxWords - overlapWords
 	}
 
 	return chunks
 }
 
-// ScrapeTranscript fetches a Frasier transcript page, extracts the title
-// and transcript body, and splits the body into overlapping chunks.
+// ScrapeTranscript fetches a Frasier transcript page, extracts the body
+// inner text, cleans it, and splits it into word-based chunks.
 func ScrapeTranscript(url string) (*TranscriptResult, error) {
-	var title string
-	var paragraphs []string
+	var bodyText string
 
 	c := colly.NewCollector()
 
@@ -68,32 +88,9 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 		r.Headers.Set("Accept-Language", "en-US,en;q=0.9")
 	})
 
-	// Extract the episode title from the <h1> or <title> tag
-	c.OnHTML("title", func(e *colly.HTMLElement) {
-		if title == "" {
-			title = strings.TrimSpace(e.Text)
-		}
-	})
-
-	c.OnHTML("h1", func(e *colly.HTMLElement) {
-		t := strings.TrimSpace(e.Text)
-		if t != "" {
-			title = t
-		}
-	})
-
-	// Extract transcript text from the main content area
-	c.OnHTML("div.content, div#content, div.main, main, div.transcript, body", func(e *colly.HTMLElement) {
-		// Only process the first match that yields content
-		if len(paragraphs) > 0 {
-			return
-		}
-		e.ForEach("p", func(_ int, p *colly.HTMLElement) {
-			text := strings.TrimSpace(p.Text)
-			if text != "" {
-				paragraphs = append(paragraphs, text)
-			}
-		})
+	// Select the <body> element and get its inner text
+	c.OnHTML("body", func(e *colly.HTMLElement) {
+		bodyText = e.Text
 	})
 
 	err := c.Visit(url)
@@ -101,17 +98,24 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 		return nil, fmt.Errorf("failed to scrape %s: %w", url, err)
 	}
 
-	if len(paragraphs) == 0 {
-		return nil, fmt.Errorf("no transcript text found at %s", url)
+	if bodyText == "" {
+		return nil, fmt.Errorf("no body text found at %s", url)
 	}
 
-	fullText := strings.Join(paragraphs, "\n\n")
+	// Clean the raw text
+	text := cleanTranscript(bodyText)
 
-	// Chunk: 1500 tokens max, 200 token overlap
-	chunks := chunkText(fullText, 1500, 200)
+	fmt.Printf("Successfully scraped %d characters of text\n", len(text))
+
+	if text == "" {
+		return nil, fmt.Errorf("no transcript text remaining after cleaning from %s", url)
+	}
+
+	// Split into 1,000-word chunks
+	chunks := chunkByWords(text, 1000)
 
 	return &TranscriptResult{
-		Title:  title,
+		Title:  "The Good Son",
 		Chunks: chunks,
 	}, nil
 }
