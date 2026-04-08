@@ -21,23 +21,23 @@ func main() {
 	query := strings.Join(os.Args[1:], " ")
 	ctx := context.Background()
 
-	// Preflight check
+	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
+
 	if err := embeddings.Preflight(); err != nil {
-		log.Fatalf("Embedding service preflight check failed: %v", err)
+		logger.Fatalf("Embedding service preflight check failed: %v", err)
 	}
 
-	// Connect to database
 	db, err := database.New(ctx)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		logger.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
 	// Step 1: Dynamic Top-K classification
-	log.Printf("Classifying query: %q", query)
+	logger.Printf("Classifying query: %q", query)
 	classification, err := ai.ClassifyQuery(ctx, query)
 	if err != nil {
-		log.Printf("Warning: failed to classify query, defaulting to GENERAL: %v", err)
+		logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
 		classification = "GENERAL"
 	}
 
@@ -45,31 +45,30 @@ func main() {
 	if classification == "SPECIFIC" {
 		topK = 3
 	}
-	log.Printf("Query classified as %s, using Top-K = %d", classification, topK)
+	logger.Printf("Query classified as %s, Top-K = %d", classification, topK)
 
 	// Step 2a: Generate Vanilla Answer (no context)
-	log.Println("Generating Vanilla AI answer (no database)...")
+	logger.Println("Generating Vanilla AI answer...")
 	vanillaAnswer, err := ai.GenerateVanillaAnswer(ctx, query)
 	if err != nil {
-		log.Printf("Warning: failed to generate vanilla answer: %v", err)
+		logger.Printf("WARN: failed to generate vanilla answer: %v", err)
 		vanillaAnswer = "(Vanilla answer unavailable)"
 	}
 
 	// Step 2b: RAG search
-	log.Printf("Generating embedding for query: %q", query)
+	logger.Println("Generating query embedding...")
 	queryEmbedding, err := embeddings.GenerateQueryEmbedding(ctx, query)
 	if err != nil {
-		log.Fatalf("Failed to generate query embedding: %v", err)
+		logger.Fatalf("Failed to generate query embedding: %v", err)
 	}
 
-	// Search articles (children)
 	results, err := db.SearchArticles(ctx, queryEmbedding, topK)
 	if err != nil {
-		log.Fatalf("Failed to search articles: %v", err)
+		logger.Fatalf("Failed to search articles: %v", err)
 	}
 
 	if len(results) == 0 {
-		fmt.Println("No results found.")
+		logger.Println("No results found.")
 		return
 	}
 
@@ -88,7 +87,7 @@ func main() {
 	if len(parentIDs) > 0 {
 		parents, err := db.GetParentChunksByIDs(ctx, parentIDs)
 		if err != nil {
-			log.Fatalf("Failed to fetch parent chunks: %v", err)
+			logger.Fatalf("Failed to fetch parent chunks: %v", err)
 		}
 		for _, p := range parents {
 			parentResults = append(parentResults, database.SearchResult{
@@ -99,71 +98,61 @@ func main() {
 		}
 	}
 
-	// Fall back to child content if no parents found
 	searchResultsForAI := parentResults
 	if len(searchResultsForAI) == 0 {
 		searchResultsForAI = results
 	}
 
 	// Generate RAG answer
-	log.Println("Generating RAG AI answer from parent chunks...")
+	logger.Println("Generating RAG AI answer...")
 	ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI)
 	if err != nil {
-		log.Fatalf("Failed to generate RAG answer: %v", err)
+		logger.Fatalf("Failed to generate RAG answer: %v", err)
 	}
 
 	// Step 3: Evaluation
-	log.Println("Evaluating answers...")
+	logger.Println("Evaluating answers...")
 	evaluation, err := ai.EvaluateAnswers(ctx, query, vanillaAnswer, ragAnswer)
 	if err != nil {
-		log.Printf("Warning: failed to evaluate answers: %v", err)
+		logger.Printf("WARN: failed to evaluate answers: %v", err)
 		evaluation = "(Evaluation unavailable)"
 	}
 
-	// Display search results
+	// Display results
+	sep := strings.Repeat("=", 80)
+
 	fmt.Println()
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Printf("  Search Results for: %q  [%s, Top-K=%d]\n", query, classification, topK)
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println()
 
 	for i, r := range results {
-		fmt.Printf("  %d. %s\n", i+1, r.Title)
-		fmt.Printf("     URL:        %s\n", r.URL)
-		fmt.Printf("     Similarity: %.4f\n", r.Similarity)
-		if r.ParentID != nil {
-			fmt.Printf("     Parent ID:  %d\n", *r.ParentID)
-		}
-		fmt.Println()
+		fmt.Printf("  %d. %s (similarity: %.4f)\n", i+1, r.Title, r.Similarity)
 	}
 
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Printf("  %d child result(s), %d unique parent(s) fetched\n", len(results), len(parentIDs))
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("\n  %d child result(s), %d unique parent(s)\n", len(results), len(parentIDs))
 
-	// Display Vanilla Answer
 	fmt.Println()
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println("  === VANILLA AI (No Database) ===")
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println()
 	fmt.Println(vanillaAnswer)
 
-	// Display RAG Answer
 	fmt.Println()
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println("  === RAG AI (Frasier Database) ===")
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println()
 	fmt.Println(ragAnswer)
 
-	// Display Evaluation
 	fmt.Println()
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println("  === EVALUATION ===")
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 	fmt.Println()
 	fmt.Println(evaluation)
 	fmt.Println()
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(sep)
 }

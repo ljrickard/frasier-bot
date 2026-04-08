@@ -1,7 +1,9 @@
 package scraper
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,12 +33,28 @@ type TranscriptResult struct {
 	Chunks []ParentChildChunk
 }
 
+// Scraper holds configuration and a logger.
+type Scraper struct {
+	logger *log.Logger
+}
+
+// New creates a new Scraper with the given logger.
+func New(logger *log.Logger) *Scraper {
+	return &Scraper{logger: logger}
+}
+
+// toValidUTF8 strips invalid UTF-8 sequences and NUL bytes from a string.
+func toValidUTF8(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	b := bytes.ReplaceAll([]byte(s), []byte{0x00}, []byte{})
+	return string(b)
+}
+
 // cleanTranscript removes navigation/header/footer lines and finds where
 // the real transcript data begins.
 func cleanTranscript(raw string) string {
 	lines := strings.Split(raw, "\n")
 
-	// Filter out nav/header/footer lines
 	skipKeywords := []string{"Home", "About", "Transcripts", "Seasons", "KACL780.NET"}
 	var filtered []string
 	for _, line := range lines {
@@ -56,7 +74,6 @@ func cleanTranscript(raw string) string {
 		}
 	}
 
-	// Find where the real data begins
 	startIdx := 0
 	for i, line := range filtered {
 		if strings.HasPrefix(line, "Transcript {") || strings.HasPrefix(line, "Act One") {
@@ -110,12 +127,11 @@ func chunkParentChild(text string) []ParentChildChunk {
 }
 
 // ScrapeTranscript fetches a Frasier transcript page, extracts the body
-// inner text, cleans it, and splits it into parent-child chunks.
-func ScrapeTranscript(url string) (*TranscriptResult, error) {
+// inner text, cleans it, sanitizes it, and splits it into parent-child chunks.
+func (s *Scraper) ScrapeTranscript(url string) (*TranscriptResult, error) {
 	var bodyText string
 
 	c := colly.NewCollector()
-
 	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 	c.OnRequest(func(r *colly.Request) {
@@ -123,7 +139,6 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 		r.Headers.Set("Accept-Language", "en-US,en;q=0.9")
 	})
 
-	// Select the <body> element and get its inner text
 	c.OnHTML("body", func(e *colly.HTMLElement) {
 		bodyText = e.Text
 	})
@@ -137,10 +152,11 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 		return nil, fmt.Errorf("no body text found at %s", url)
 	}
 
+	// Sanitize: strip invalid UTF-8 and NUL bytes
+	bodyText = toValidUTF8(bodyText)
+
 	// Clean the raw text
 	text := cleanTranscript(bodyText)
-
-	fmt.Printf("Successfully scraped %d characters of text\n", len(text))
 
 	if text == "" {
 		return nil, fmt.Errorf("no transcript text remaining after cleaning from %s", url)
@@ -156,19 +172,16 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 
 // DiscoverEpisodes crawls the root transcripts page, finds all season pages,
 // then finds all episode links within each season page.
-func DiscoverEpisodes() ([]EpisodeInfo, error) {
+func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	var episodes []EpisodeInfo
 	var seasonURLs []string
 
-	// Step 1 & 2: Visit root URL, find all season links
 	rootCollector := colly.NewCollector()
 	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		href := e.Request.AbsoluteURL(e.Attr("href"))
 		if strings.Contains(href, "season_") {
-			fmt.Printf("[Discovery] Found season link: %s\n", href)
-			// Deduplicate
 			for _, u := range seasonURLs {
 				if u == href {
 					return
@@ -178,16 +191,15 @@ func DiscoverEpisodes() ([]EpisodeInfo, error) {
 		}
 	})
 
-	fmt.Printf("[Discovery] Visiting root: %s\n", RootURL)
+	s.logger.Printf("Discovering episodes from %s", RootURL)
 	err := rootCollector.Visit(RootURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to visit root URL %s: %w", RootURL, err)
 	}
 	rootCollector.Wait()
 
-	fmt.Printf("[Discovery] Found %d season URLs\n", len(seasonURLs))
+	s.logger.Printf("Found %d seasons", len(seasonURLs))
 
-	// Step 3: Visit each season page, find all .html links that are not index.html
 	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
 
 	for _, seasonURL := range seasonURLs {
@@ -197,7 +209,6 @@ func DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 			href := e.Request.AbsoluteURL(e.Attr("href"))
 
-			// Skip index.html and non-.html links
 			if !strings.HasSuffix(href, ".html") {
 				return
 			}
@@ -205,12 +216,8 @@ func DiscoverEpisodes() ([]EpisodeInfo, error) {
 				return
 			}
 
-			fmt.Printf("[Discovery] Found episode link: %s\n", href)
-
-			// Step 4: Extract season, episode, title from URL
 			matches := episodeRe.FindStringSubmatch(href)
 			if matches == nil {
-				fmt.Printf("[Discovery] WARNING: Could not parse season/episode from: %s\n", href)
 				return
 			}
 
@@ -219,7 +226,6 @@ func DiscoverEpisodes() ([]EpisodeInfo, error) {
 			rawTitle := matches[3]
 			title := formatTitle(rawTitle)
 
-			// Deduplicate
 			for _, ep := range episodes {
 				if ep.URL == href {
 					return
@@ -232,19 +238,17 @@ func DiscoverEpisodes() ([]EpisodeInfo, error) {
 				EpisodeTitle: title,
 				URL:          href,
 			})
-			fmt.Printf("[Discovery] Parsed: S%02dE%02d - %s\n", season, episode, title)
 		})
 
-		fmt.Printf("[Discovery] Visiting season page: %s\n", seasonURL)
 		err := seasonCollector.Visit(seasonURL)
 		if err != nil {
-			fmt.Printf("[Discovery] WARNING: Failed to visit %s: %v\n", seasonURL, err)
+			s.logger.Printf("WARN: Failed to visit season page %s: %v", seasonURL, err)
 			continue
 		}
 		seasonCollector.Wait()
 	}
 
-	fmt.Printf("[Discovery] Total episodes discovered: %d\n", len(episodes))
+	s.logger.Printf("Discovered %d episodes total", len(episodes))
 	return episodes, nil
 }
 
