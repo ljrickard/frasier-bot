@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"omnicorp-analyst/internal/database"
+	"omnicorp-analyst/internal/embeddings"
 	"omnicorp-analyst/internal/models"
 	"omnicorp-analyst/internal/scraper"
 )
@@ -45,11 +46,16 @@ func main() {
 
 	saved := 0
 	for i := range articles {
+		log.Printf("Generating embedding for article %d/%d: %q", i+1, len(articles), articles[i].Title)
+		embeddingInput := articles[i].Title + "\n\n" + articles[i].Content
+		embedding := embeddings.SafeGenerateEmbedding(ctx, embeddingInput)
+
 		a := &models.Article{
 			CompanyID: defaultCompany.ID,
 			Title:     articles[i].Title,
 			Content:   articles[i].Content,
 			Source:    articles[i].Source,
+			Embedding: embedding,
 		}
 
 		log.Printf("Saving article %d/%d: %q", i+1, len(articles), a.Title)

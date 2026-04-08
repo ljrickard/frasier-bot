@@ -46,12 +46,46 @@ func (db *DB) Close() {
 }
 
 func (db *DB) RunMigrations(ctx context.Context) error {
-	query := `
-		ALTER TABLE companies
-		ADD CONSTRAINT companies_name_unique UNIQUE (name);
-	`
+	_, err := db.Pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`)
+	if err != nil {
+		return fmt.Errorf("failed to create vector extension: %w", err)
+	}
+
+	_, err = db.Pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS companies (
+			id             BIGSERIAL PRIMARY KEY,
+			name           TEXT NOT NULL,
+			ticker         TEXT,
+			sector         TEXT,
+			description    TEXT,
+			created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`)
+	if err != nil {
+		return fmt.Errorf("failed to create companies table: %w", err)
+	}
+
 	// Ignore error if constraint already exists
-	_, _ = db.Pool.Exec(ctx, query)
+	_, _ = db.Pool.Exec(ctx, `
+		ALTER TABLE companies
+		ADD CONSTRAINT companies_name_unique UNIQUE (name)`)
+
+	_, err = db.Pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS articles (
+			id                BIGSERIAL PRIMARY KEY,
+			company_id        BIGINT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+			title             TEXT NOT NULL,
+			content           TEXT,
+			source            TEXT,
+			published_at      TIMESTAMPTZ,
+			published_at_local TEXT,
+			embedding         vector(768),
+			created_at_utc    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at_utc    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`)
+	if err != nil {
+		return fmt.Errorf("failed to create articles table: %w", err)
+	}
 
 	return nil
 }

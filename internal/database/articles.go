@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pgvector/pgvector-go"
 	"omnicorp-analyst/internal/models"
 )
 
@@ -16,9 +17,15 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 		article.PublishedAtLocal = &local
 	}
 
+	var embedding *pgvector.Vector
+	if len(article.Embedding) > 0 {
+		v := pgvector.NewVector(article.Embedding)
+		embedding = &v
+	}
+
 	query := `
-		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local, embedding)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at_utc, updated_at_utc`
 
 	err := db.Pool.QueryRow(ctx, query,
@@ -28,6 +35,7 @@ func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error 
 		article.Source,
 		article.PublishedAt,
 		article.PublishedAtLocal,
+		embedding,
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create article: %w", err)
@@ -42,9 +50,15 @@ func (db *DB) InsertArticle(ctx context.Context, article *models.Article) error 
 		article.PublishedAtLocal = &local
 	}
 
+	var embedding *pgvector.Vector
+	if len(article.Embedding) > 0 {
+		v := pgvector.NewVector(article.Embedding)
+		embedding = &v
+	}
+
 	query := `
-		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO articles (company_id, title, content, source, published_at, published_at_local, embedding)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT DO NOTHING
 		RETURNING id, created_at_utc, updated_at_utc`
 
@@ -55,6 +69,7 @@ func (db *DB) InsertArticle(ctx context.Context, article *models.Article) error 
 		article.Source,
 		article.PublishedAt,
 		article.PublishedAtLocal,
+		embedding,
 	).Scan(&article.ID, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
