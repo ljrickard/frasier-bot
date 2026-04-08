@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 
 	"omnicorp-analyst/internal/database"
@@ -32,49 +33,54 @@ func main() {
 	}
 	log.Println("Embedding service configured correctly.")
 
-	defaultCompany := &models.Company{
-		Name:   "BBC Sport",
-		Ticker: "BBC",
+	// Get or create the Frasier company/show entry
+	show := &models.Company{
+		Name:        "Frasier",
+		Ticker:      "FRASIER",
+		Description: "Frasier TV Show Transcripts",
 	}
-	if err := db.GetOrCreateCompany(ctx, defaultCompany); err != nil {
-		log.Fatalf("Failed to get or create default company: %v", err)
+	if err := db.GetOrCreateCompany(ctx, show); err != nil {
+		log.Fatalf("Failed to get or create show: %v", err)
 	}
-	log.Printf("Using company id=%d name=%q", defaultCompany.ID, defaultCompany.Name)
+	log.Printf("Using company id=%d name=%q", show.ID, show.Name)
 
-	url := "https://www.bbc.co.uk/sport/golf/articles/cn89zp1e38no"
-	log.Printf("Scraping articles from %s", url)
+	// Scrape a single episode
+	url := "https://www.kacl780.net/frasier/transcripts/s01/e01/"
+	seasonEp := "S01E01"
 
-	articles, err := scraper.ScrapeArticles(url)
+	log.Printf("Scraping transcript from %s", url)
+	result, err := scraper.ScrapeTranscript(url)
 	if err != nil {
-		log.Fatalf("Failed to scrape articles: %v", err)
+		log.Fatalf("Failed to scrape transcript: %v", err)
 	}
-	log.Printf("Found %d articles.", len(articles))
+	log.Printf("Extracted title: %q with %d chunks", result.Title, len(result.Chunks))
 
 	saved := 0
-	for i := range articles {
-		log.Printf("Generating embedding for article %d/%d: %q", i+1, len(articles), articles[i].Title)
-		embeddingInput := articles[i].Title + "\n\n" + articles[i].Content
-		embedding, err := embeddings.GenerateEmbedding(ctx, embeddingInput)
+	for i, chunk := range result.Chunks {
+		partTitle := fmt.Sprintf("%s - %s - Part %d", seasonEp, result.Title, i+1)
+
+		log.Printf("Generating embedding for chunk %d/%d: %q", i+1, len(result.Chunks), partTitle)
+		embedding, err := embeddings.GenerateEmbedding(ctx, chunk)
 		if err != nil {
-			log.Fatalf("Failed to generate embedding for article %q: %v", articles[i].Title, err)
+			log.Fatalf("Failed to generate embedding for chunk %d: %v", i+1, err)
 		}
 
 		a := &models.Article{
-			CompanyID: defaultCompany.ID,
-			Title:     articles[i].Title,
-			Content:   articles[i].Content,
-			Source:    articles[i].Source,
+			CompanyID: show.ID,
+			Title:     partTitle,
+			Content:   chunk,
+			Source:    url,
 			Embedding: embedding,
 		}
 
-		log.Printf("Saving article %d/%d: %q", i+1, len(articles), a.Title)
+		log.Printf("Saving chunk %d/%d: %q", i+1, len(result.Chunks), partTitle)
 		if err := db.CreateArticle(ctx, a); err != nil {
-			log.Printf("Warning: failed to save article %q: %v", a.Title, err)
+			log.Printf("Warning: failed to save chunk %d: %v", i+1, err)
 			continue
 		}
 		saved++
 		log.Printf("Saved article id=%d title=%q", a.ID, a.Title)
 	}
 
-	log.Printf("Done. Saved %d/%d articles to the database.", saved, len(articles))
+	log.Printf("Done. Saved %d/%d chunks to the database.", saved, len(result.Chunks))
 }

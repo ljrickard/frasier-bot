@@ -49,7 +49,8 @@ func GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	resourceName := fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", project, location, model)
 
 	instance, err := structpb.NewValue(map[string]interface{}{
-		"content": text,
+		"content":   text,
+		"task_type": "RETRIEVAL_DOCUMENT",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instance value: %w", err)
