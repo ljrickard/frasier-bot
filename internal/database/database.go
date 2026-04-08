@@ -111,3 +111,23 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 
 	return nil
 }
+
+// ClearDatabase drops all data from articles, parent_chunks, and companies tables.
+func (db *DB) ClearDatabase(ctx context.Context) error {
+	_, err := db.Pool.Exec(ctx, `DELETE FROM articles`)
+	if err != nil {
+		return fmt.Errorf("failed to clear articles: %w", err)
+	}
+
+	_, err = db.Pool.Exec(ctx, `DELETE FROM parent_chunks`)
+	if err != nil {
+		return fmt.Errorf("failed to clear parent_chunks: %w", err)
+	}
+
+	_, err = db.Pool.Exec(ctx, `DELETE FROM companies`)
+	if err != nil {
+		return fmt.Errorf("failed to clear companies: %w", err)
+	}
+
+	return nil
+}

@@ -27,6 +27,14 @@ func main() {
 
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
 
+	// Check for --reset flag
+	resetDB := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--reset" {
+			resetDB = true
+		}
+	}
+
 	logger.Println("Connecting to database...")
 	db, err := database.New(ctx)
 	if err != nil {
@@ -39,6 +47,14 @@ func main() {
 		logger.Fatalf("Failed to run migrations: %v", err)
 	}
 	logger.Println("Migrations completed successfully.")
+
+	if resetDB {
+		logger.Println("--reset flag detected. Clearing all data...")
+		if err := db.ClearDatabase(ctx); err != nil {
+			logger.Fatalf("Failed to clear database: %v", err)
+		}
+		logger.Println("Database cleared successfully.")
+	}
 
 	if err := embeddings.Preflight(); err != nil {
 		logger.Fatalf("Embedding service preflight check failed: %v", err)
@@ -70,14 +86,15 @@ func main() {
 		logger.Fatalf("No episodes discovered. Check the root URL: %s", scraper.RootURL)
 	}
 
-	// Count unique seasons
+	// Count unique seasons — must be exactly 11
 	seasonSet := make(map[int]bool)
 	for _, ep := range episodes {
 		seasonSet[ep.Season] = true
 	}
 	if len(seasonSet) != 11 {
-		logger.Printf("WARNING: Expected 11 seasons but found %d. Seasons present: %v", len(seasonSet), seasonSet)
+		logger.Fatalf("FATAL: Expected 11 seasons but found %d. Seasons present: %v", len(seasonSet), seasonSet)
 	}
+	logger.Printf("Found 11 Seasons with %d total episodes", len(episodes))
 
 	sort.Slice(episodes, func(i, j int) bool {
 		if episodes[i].Season != episodes[j].Season {

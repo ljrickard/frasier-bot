@@ -170,66 +170,23 @@ func (s *Scraper) ScrapeTranscript(url string) (*TranscriptResult, error) {
 	}, nil
 }
 
-// DiscoverEpisodes crawls the root transcripts page, finds all season pages,
-// then finds all episode links within each season page.
+// DiscoverEpisodes builds the list of season URLs directly (no crawling needed
+// for seasons), then crawls each season page to find episode links.
 func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 	var episodes []EpisodeInfo
+
+	// --- Phase 1: Build season URLs directly (seasons 1-11) ---
 	var seasonURLs []string
+	for i := 1; i <= 11; i++ {
+		seasonURLs = append(seasonURLs, fmt.Sprintf("%sseason_%d/", RootURL, i))
+	}
+
+	s.logger.Printf("Found %d Seasons", len(seasonURLs))
 
 	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
-
-	// --- Phase 1: Discover seasons ---
-	rootCollector := colly.NewCollector()
-	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-	var rootBody string
-
-	rootCollector.OnHTML("body", func(e *colly.HTMLElement) {
-		rootBody = e.Text
-	})
-
-	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		rawHref := strings.TrimSpace(e.Attr("href"))
-		linkText := strings.TrimSpace(e.Text)
-
-		if strings.Contains(strings.ToLower(rawHref), "season") ||
-			strings.Contains(strings.ToLower(linkText), "season") {
-
-			href := e.Request.AbsoluteURL(rawHref)
-			if href == "" {
-				return
-			}
-
-			// Deduplicate
-			for _, u := range seasonURLs {
-				if u == href {
-					return
-				}
-			}
-
-			seasonURLs = append(seasonURLs, href)
-			s.logger.Printf("Found Season: %s", href)
-		}
-	})
-
-	s.logger.Printf("Visiting root: %s", RootURL)
-	err := rootCollector.Visit(RootURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to visit root URL %s: %w", RootURL, err)
-	}
-	rootCollector.Wait()
-
-	// If no seasons found, dump the page body for debugging
-	if len(seasonURLs) == 0 {
-		s.logger.Printf("WARNING: Found 0 seasons. Root page body:\n%s", rootBody)
-		return nil, fmt.Errorf("no seasons found at %s", RootURL)
-	}
-
-	s.logger.Printf("Found %d season URLs", len(seasonURLs))
-
-	// --- Phase 2: Discover episodes within each season ---
 	blocked := []string{"geocities", "archive", "wstub", "index", "about"}
 
+	// --- Phase 2: Discover episodes within each season ---
 	for _, seasonURL := range seasonURLs {
 		seasonCollector := colly.NewCollector()
 		seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -237,6 +194,11 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 			rawHref := strings.TrimSpace(e.Attr("href"))
 			lower := strings.ToLower(rawHref)
+
+			// Must contain episode_
+			if !strings.Contains(lower, "episode_") {
+				return
+			}
 
 			// Must end in .html
 			if !strings.HasSuffix(lower, ".html") {
@@ -264,12 +226,9 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 				}
 			}
 
-			s.logger.Printf("Found Episode: %s", href)
-
-			// Try to extract season/episode/title from URL
+			// Parse season/episode/title from URL
 			matches := episodeRe.FindStringSubmatch(href)
 			if matches == nil {
-				s.logger.Printf("WARN: Could not parse season/episode from: %s", href)
 				return
 			}
 
@@ -301,7 +260,7 @@ func (s *Scraper) DiscoverEpisodes() ([]EpisodeInfo, error) {
 		seasonCollector.Wait()
 	}
 
-	s.logger.Printf("Validated: %d Seasons found. Total unique Episodes found: %d", len(seasonURLs), len(episodes))
+	s.logger.Printf("Validated: %d Seasons. Total unique Episodes found: %d", len(seasonURLs), len(episodes))
 	return episodes, nil
 }
 
