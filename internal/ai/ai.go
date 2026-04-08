@@ -7,13 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"cloud.google.com/go/vertexai/genai"
+	"google.golang.org/genai"
 	"omnicorp-analyst/internal/database"
 )
 
 const (
-	defaultLocation = "europe-west2"
-	geminiModel     = "gemini-2.5-flash"
+	geminiModel = "gemini-2.5-flash"
 )
 
 // GenerateAnswer takes a user query and a slice of search results,
@@ -26,17 +25,17 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = defaultLocation
+		location = "europe-west2"
 	}
 
-	client, err := genai.NewClient(ctx, project, location)
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
 	if err != nil {
-		return "", fmt.Errorf("failed to create vertex ai client: %w", err)
+		return "", fmt.Errorf("failed to create genai client: %w", err)
 	}
-	defer client.Close()
-
-	model := client.GenerativeModel(geminiModel)
-	model.SetTemperature(0.2)
 
 	// Augmentation: build the prompt
 	var contextBuilder strings.Builder
@@ -56,41 +55,41 @@ Question: %s`, contextBuilder.String(), query)
 
 	log.Printf("Sending prompt to %s...", geminiModel)
 
+	temperature := float32(0.2)
+
 	// Generation: send to Gemini
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+		Temperature: &temperature,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
 
 	// Extract text from response
-	answer, err := extractText(resp)
-	if err != nil {
-		return "", fmt.Errorf("failed to extract text from response: %w", err)
+	answer := extractText(resp)
+	if answer == "" {
+		return "", fmt.Errorf("empty response from model")
 	}
 
 	return answer, nil
 }
 
-func extractText(resp *genai.GenerateContentResponse) (string, error) {
+func extractText(resp *genai.GenerateContentResponse) string {
 	if resp == nil || len(resp.Candidates) == 0 {
-		return "", fmt.Errorf("empty response from model")
+		return ""
 	}
 
 	candidate := resp.Candidates[0]
 	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return "", fmt.Errorf("no content parts in response")
+		return ""
 	}
 
 	var parts []string
 	for _, part := range candidate.Content.Parts {
-		if text, ok := part.(genai.Text); ok {
-			parts = append(parts, string(text))
+		if part.Text != "" {
+			parts = append(parts, part.Text)
 		}
 	}
 
-	if len(parts) == 0 {
-		return "", fmt.Errorf("no text parts found in response")
-	}
-
-	return strings.Join(parts, "\n"), nil
+	return strings.Join(parts, "\n")
 }
