@@ -135,54 +135,93 @@ func ScrapeTranscript(url string) (*TranscriptResult, error) {
 // then finds all episode links within each season page.
 func DiscoverEpisodes() ([]EpisodeInfo, error) {
 	var episodes []EpisodeInfo
+	var seasonURLs []string
 
-	seasonRe := regexp.MustCompile(`/season_(\d+)/?$`)
-	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
+	// Step 1 & 2: Visit root URL, find all season links
+	rootCollector := colly.NewCollector()
+	rootCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-	seasonCollector := colly.NewCollector()
-	seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-	episodeCollector := colly.NewCollector()
-	episodeCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-	// On the main transcripts page, find season links
-	seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+	rootCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		href := e.Request.AbsoluteURL(e.Attr("href"))
-		if seasonRe.MatchString(href) {
-			episodeCollector.Visit(href)
+		if strings.Contains(href, "season_") {
+			fmt.Printf("[Discovery] Found season link: %s\n", href)
+			// Deduplicate
+			for _, u := range seasonURLs {
+				if u == href {
+					return
+				}
+			}
+			seasonURLs = append(seasonURLs, href)
 		}
 	})
 
-	// On each season page, find episode links
-	episodeCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		href := e.Request.AbsoluteURL(e.Attr("href"))
-		matches := episodeRe.FindStringSubmatch(href)
-		if matches == nil {
-			return
-		}
-
-		season, _ := strconv.Atoi(matches[1])
-		episode, _ := strconv.Atoi(matches[2])
-		rawTitle := matches[3]
-
-		title := formatTitle(rawTitle)
-
-		episodes = append(episodes, EpisodeInfo{
-			Season:       season,
-			Episode:      episode,
-			EpisodeTitle: title,
-			URL:          href,
-		})
-	})
-
-	err := seasonCollector.Visit(RootURL)
+	fmt.Printf("[Discovery] Visiting root: %s\n", RootURL)
+	err := rootCollector.Visit(RootURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to visit root URL %s: %w", RootURL, err)
 	}
+	rootCollector.Wait()
 
-	seasonCollector.Wait()
-	episodeCollector.Wait()
+	fmt.Printf("[Discovery] Found %d season URLs\n", len(seasonURLs))
 
+	// Step 3: Visit each season page, find all .html links that are not index.html
+	episodeRe := regexp.MustCompile(`/season_(\d+)/episode_(\d+)/([^/]+)\.html$`)
+
+	for _, seasonURL := range seasonURLs {
+		seasonCollector := colly.NewCollector()
+		seasonCollector.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+		seasonCollector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+			href := e.Request.AbsoluteURL(e.Attr("href"))
+
+			// Skip index.html and non-.html links
+			if !strings.HasSuffix(href, ".html") {
+				return
+			}
+			if strings.HasSuffix(href, "index.html") {
+				return
+			}
+
+			fmt.Printf("[Discovery] Found episode link: %s\n", href)
+
+			// Step 4: Extract season, episode, title from URL
+			matches := episodeRe.FindStringSubmatch(href)
+			if matches == nil {
+				fmt.Printf("[Discovery] WARNING: Could not parse season/episode from: %s\n", href)
+				return
+			}
+
+			season, _ := strconv.Atoi(matches[1])
+			episode, _ := strconv.Atoi(matches[2])
+			rawTitle := matches[3]
+			title := formatTitle(rawTitle)
+
+			// Deduplicate
+			for _, ep := range episodes {
+				if ep.URL == href {
+					return
+				}
+			}
+
+			episodes = append(episodes, EpisodeInfo{
+				Season:       season,
+				Episode:      episode,
+				EpisodeTitle: title,
+				URL:          href,
+			})
+			fmt.Printf("[Discovery] Parsed: S%02dE%02d - %s\n", season, episode, title)
+		})
+
+		fmt.Printf("[Discovery] Visiting season page: %s\n", seasonURL)
+		err := seasonCollector.Visit(seasonURL)
+		if err != nil {
+			fmt.Printf("[Discovery] WARNING: Failed to visit %s: %v\n", seasonURL, err)
+			continue
+		}
+		seasonCollector.Wait()
+	}
+
+	fmt.Printf("[Discovery] Total episodes discovered: %d\n", len(episodes))
 	return episodes, nil
 }
 
