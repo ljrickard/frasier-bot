@@ -12,6 +12,18 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// Preflight validates that all required configuration is present before
+// the scraper starts doing any real work.
+func Preflight() error {
+	if os.Getenv("GOOGLE_CLOUD_PROJECT") == "" {
+		return fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
+	}
+	if os.Getenv("GOOGLE_CLOUD_LOCATION") == "" {
+		log.Println("GOOGLE_CLOUD_LOCATION not set, will default to us-central1")
+	}
+	return nil
+}
+
 // GenerateEmbedding calls the Vertex AI text-embedding model and returns a
 // float32 slice for the given text.
 func GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
@@ -79,15 +91,4 @@ func GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	}
 
 	return result, nil
-}
-
-// SafeGenerateEmbedding wraps GenerateEmbedding and logs a warning instead of
-// returning an error, so a missing embedding never blocks article ingestion.
-func SafeGenerateEmbedding(ctx context.Context, text string) []float32 {
-	embedding, err := GenerateEmbedding(ctx, text)
-	if err != nil {
-		log.Printf("Warning: failed to generate embedding: %v", err)
-		return nil
-	}
-	return embedding
 }

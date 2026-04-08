@@ -26,6 +26,12 @@ func main() {
 	}
 	log.Println("Migrations completed successfully.")
 
+	log.Println("Checking embedding service configuration...")
+	if err := embeddings.Preflight(); err != nil {
+		log.Fatalf("Embedding service preflight check failed: %v", err)
+	}
+	log.Println("Embedding service configured correctly.")
+
 	defaultCompany := &models.Company{
 		Name:   "BBC Sport",
 		Ticker: "BBC",
@@ -48,7 +54,10 @@ func main() {
 	for i := range articles {
 		log.Printf("Generating embedding for article %d/%d: %q", i+1, len(articles), articles[i].Title)
 		embeddingInput := articles[i].Title + "\n\n" + articles[i].Content
-		embedding := embeddings.SafeGenerateEmbedding(ctx, embeddingInput)
+		embedding, err := embeddings.GenerateEmbedding(ctx, embeddingInput)
+		if err != nil {
+			log.Fatalf("Failed to generate embedding for article %q: %v", articles[i].Title, err)
+		}
 
 		a := &models.Article{
 			CompanyID: defaultCompany.ID,
