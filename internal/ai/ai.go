@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -20,6 +21,16 @@ func init() {
 	log.SetOutput(os.Stderr)
 }
 
+// suppressSDKWarnings temporarily discards default log output during f(),
+// then restores it. This silences noisy SDK warnings like
+// "Warning: The user provided project/location will take precedence..."
+func suppressSDKWarnings(f func()) {
+	original := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(original)
+	f()
+}
+
 // GenerateAnswer takes a user query and a slice of search results,
 // constructs an augmented prompt, and sends it to Gemini for generation.
 func GenerateAnswer(ctx context.Context, query string, articles []database.SearchResult) (string, error) {
@@ -33,13 +44,17 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 		location = "europe-west2"
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Project:  project,
-		Location: location,
-		Backend:  genai.BackendVertexAI,
+	var client *genai.Client
+	var clientErr error
+	suppressSDKWarnings(func() {
+		client, clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			Project:  project,
+			Location: location,
+			Backend:  genai.BackendVertexAI,
+		})
 	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
+	if clientErr != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
 	// Augmentation: build the prompt
@@ -90,13 +105,17 @@ func ClassifyQuery(ctx context.Context, query string) (string, error) {
 		location = "europe-west2"
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Project:  project,
-		Location: location,
-		Backend:  genai.BackendVertexAI,
+	var client *genai.Client
+	var clientErr error
+	suppressSDKWarnings(func() {
+		client, clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			Project:  project,
+			Location: location,
+			Backend:  genai.BackendVertexAI,
+		})
 	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
+	if clientErr != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
 	prompt := fmt.Sprintf(`Classify this query as 'SPECIFIC' (asking for a name, date, or quote) or 'GENERAL' (asking for a summary or theme). Respond with only one word.
@@ -138,13 +157,17 @@ func ReformulateQuery(ctx context.Context, query string, history []string) (stri
 		location = "europe-west2"
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Project:  project,
-		Location: location,
-		Backend:  genai.BackendVertexAI,
+	var client *genai.Client
+	var clientErr error
+	suppressSDKWarnings(func() {
+		client, clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			Project:  project,
+			Location: location,
+			Backend:  genai.BackendVertexAI,
+		})
 	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
+	if clientErr != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
 	var historyBuilder strings.Builder
@@ -188,13 +211,17 @@ func GenerateVanillaAnswer(ctx context.Context, query string) (string, error) {
 		location = "europe-west2"
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Project:  project,
-		Location: location,
-		Backend:  genai.BackendVertexAI,
+	var client *genai.Client
+	var clientErr error
+	suppressSDKWarnings(func() {
+		client, clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			Project:  project,
+			Location: location,
+			Backend:  genai.BackendVertexAI,
+		})
 	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
+	if clientErr != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
 	prompt := fmt.Sprintf(`You are a helpful assistant who is knowledgeable about the TV show Frasier. Answer the following question to the best of your ability.
@@ -230,13 +257,17 @@ func EvaluateAnswers(ctx context.Context, query, vanillaAnswer, ragAnswer string
 		location = "europe-west2"
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Project:  project,
-		Location: location,
-		Backend:  genai.BackendVertexAI,
+	var client *genai.Client
+	var clientErr error
+	suppressSDKWarnings(func() {
+		client, clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			Project:  project,
+			Location: location,
+			Backend:  genai.BackendVertexAI,
+		})
 	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
+	if clientErr != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
 	prompt := fmt.Sprintf(`You are an evaluator. A user asked a question about the TV show Frasier. Two AI systems answered: one with no database context ("Vanilla AI") and one with actual transcript data ("RAG AI").
