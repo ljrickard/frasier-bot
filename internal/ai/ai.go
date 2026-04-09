@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 	"omnicorp-analyst/internal/database"
@@ -29,6 +31,45 @@ func suppressSDKWarnings(f func()) {
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(original)
 	f()
+}
+
+// callWithRetry wraps a Gemini API call with exponential backoff + jitter.
+// It retries up to 5 times on 429 / Resource Exhausted errors.
+func callWithRetry(ctx context.Context, fn func() (*genai.GenerateContentResponse, error)) (*genai.GenerateContentResponse, error) {
+	maxRetries := 5
+	baseDelay := 2 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, err := fn()
+		if err == nil {
+			return resp, nil
+		}
+
+		errStr := err.Error()
+		is429 := strings.Contains(errStr, "429") ||
+			strings.Contains(errStr, "RESOURCE_EXHAUSTED") ||
+			strings.Contains(errStr, "resource exhausted") ||
+			strings.Contains(errStr, "Resource has been exhausted")
+
+		if !is429 || attempt == maxRetries {
+			return nil, err
+		}
+
+		// Exponential backoff: 2s, 4s, 8s, 16s, 32s + jitter
+		delay := baseDelay * (1 << uint(attempt))
+		jitter := time.Duration(rand.Int63n(int64(delay) / 4))
+		wait := delay + jitter
+
+		log.Printf("Rate limited (429), retry %d/%d in %v...", attempt+1, maxRetries, wait)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+
+	return nil, fmt.Errorf("max retries exceeded")
 }
 
 // GenerateAnswer takes a user query and a slice of search results,
@@ -68,7 +109,9 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 		contextBuilder.WriteString("\n")
 	}
 
-	prompt := fmt.Sprintf(`You are a helpful Omnicorp news analyst. Answer the user's question using ONLY the provided context below. Do not make up information. If the context does not contain enough information to answer the question, say so.
+	prompt := fmt.Sprintf(`You are an expert on the TV show Frasier. Answer the user's question using ONLY the provided context below. Do not make up information. If the context does not contain enough information to answer the question, say so.
+
+Pay strict attention to the [SxxExx] metadata to determine the chronological order of events. Season 11 events are the most recent; Season 1 are the oldest.
 
 Context:
 %s
@@ -77,8 +120,10 @@ Question: %s`, contextBuilder.String(), query)
 	temperature := float32(0.2)
 
 	// Generation: send to Gemini
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-		Temperature: &temperature,
+	resp, err := callWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
+		return client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		})
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
@@ -124,8 +169,10 @@ Query: %s`, query)
 
 	temperature := float32(0.0)
 
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-		Temperature: &temperature,
+	resp, err := callWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
+		return client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		})
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to classify query: %w", err)
@@ -184,8 +231,10 @@ Latest Question: %s`, historyBuilder.String(), query)
 
 	temperature := float32(0.0)
 
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-		Temperature: &temperature,
+	resp, err := callWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
+		return client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		})
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to reformulate query: %w", err)
@@ -230,8 +279,10 @@ Question: %s`, query)
 
 	temperature := float32(0.2)
 
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-		Temperature: &temperature,
+	resp, err := callWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
+		return client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		})
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate vanilla answer: %w", err)
@@ -284,8 +335,10 @@ Based on the RAG AI's context-grounded answer, did the Vanilla AI get anything w
 
 	temperature := float32(0.2)
 
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-		Temperature: &temperature,
+	resp, err := callWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
+		return client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		})
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate answers: %w", err)

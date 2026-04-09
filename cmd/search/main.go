@@ -132,10 +132,11 @@ func main() {
 				logger.Printf("WARN: failed to fetch parent chunks: %v", err)
 			} else {
 				for _, p := range parents {
+					enrichedContent := fmt.Sprintf("[S%02dE%02d] %s", p.Season, p.Episode, p.Content)
 					parentResults = append(parentResults, database.SearchResult{
 						Title:   fmt.Sprintf("S%02dE%02d: %s", p.Season, p.Episode, p.EpisodeTitle),
 						URL:     p.URL,
-						Content: p.Content,
+						Content: enrichedContent,
 					})
 				}
 			}
