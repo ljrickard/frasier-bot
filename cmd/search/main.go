@@ -202,7 +202,12 @@ func main() {
 				fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", reformulated)
 			}
 			fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Fetch=%d, Final=%d, PerEpisode=%d]\033[0m\n", classification, fetchK, finalK, perEpisodeLimit)
-			fmt.Printf("  \033[36mDEBUG: Reranker kept %d out of %d chunks\033[0m\n", len(searchResultsForAI), preRerankCount)
+
+			if cfg.UseReranker {
+				fmt.Printf("  \033[36mDEBUG: Reranker kept %d out of %d chunks\033[0m\n", len(searchResultsForAI), preRerankCount)
+			} else {
+				fmt.Printf("  \033[36mDEBUG: Reranker -> [DISABLED] Bypassed\033[0m\n")
+			}
 
 			// Count unique episodes
 			uniqueEpisodes := make(map[string]bool)
