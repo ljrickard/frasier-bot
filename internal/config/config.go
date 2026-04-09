@@ -15,19 +15,21 @@ type RAGConfig struct {
 	UseReranker    bool
 	UsePersona     bool
 	CompareMode    bool
+	Debug          bool
 }
 
 // ParseFlags parses command-line flags and returns a RAGConfig.
 func ParseFlags() *RAGConfig {
 	cfg := &RAGConfig{}
 
-	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Prefix chunks with [SxxExx] episode metadata")
-	flag.BoolVar(&cfg.UseSwitchboard, "switchboard", true, "Use LLM query classification (GENERAL/SPECIFIC)")
-	flag.BoolVar(&cfg.UseDiversity, "diversity", true, "Apply per-episode diversity capping")
-	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Use LLM query expansion/reformulation")
-	flag.BoolVar(&cfg.UseReranker, "reranker", true, "Use LLM-based semantic reranking")
-	flag.BoolVar(&cfg.UsePersona, "persona", true, "Use Frasier Crane personality in responses")
+	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords to match broader user intent")
+	flag.BoolVar(&cfg.UseSwitchboard, "switchboard", true, "Dynamically adjust Top-K context size based on query type")
+	flag.BoolVar(&cfg.UseDiversity, "diversity", true, "Force search results to span multiple different episodes")
+	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Inject [SxxExx] tags for chronological awareness")
+	flag.BoolVar(&cfg.UseReranker, "reranker", true, "Use LLM to grade and re-sort search results for accuracy")
+	flag.BoolVar(&cfg.UsePersona, "persona", true, "Apply the Frasier/Crane brother persona to the final output")
 	flag.BoolVar(&cfg.CompareMode, "compare", false, "Enable compare mode: Vanilla AI + Evaluation")
+	flag.BoolVar(&cfg.Debug, "debug", false, "Enable verbose debug logging in the terminal")
 
 	flag.Parse()
 	return cfg
@@ -46,6 +48,7 @@ func (c *RAGConfig) PrintStatus() {
 		{"Semantic Reranker", c.UseReranker},
 		{"Frasier Persona", c.UsePersona},
 		{"Compare Mode", c.CompareMode},
+		{"Debug Logging", c.Debug},
 	}
 
 	fmt.Println("  ┌─────────────────────────┬──────────┐")

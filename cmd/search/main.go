@@ -197,18 +197,20 @@ func main() {
 		spin.Stop()
 
 		// Print debug info after spinner is cleared
-		if reformulated != query {
-			fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", reformulated)
-		}
-		fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Fetch=%d, Final=%d, PerEpisode=%d]\033[0m\n", classification, fetchK, finalK, perEpisodeLimit)
-		fmt.Printf("  \033[36mDEBUG: Reranker kept %d out of %d chunks\033[0m\n", len(searchResultsForAI), preRerankCount)
+		if cfg.Debug {
+			if reformulated != query {
+				fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", reformulated)
+			}
+			fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Fetch=%d, Final=%d, PerEpisode=%d]\033[0m\n", classification, fetchK, finalK, perEpisodeLimit)
+			fmt.Printf("  \033[36mDEBUG: Reranker kept %d out of %d chunks\033[0m\n", len(searchResultsForAI), preRerankCount)
 
-		// Count unique episodes
-		uniqueEpisodes := make(map[string]bool)
-		for _, r := range searchResultsForAI {
-			uniqueEpisodes[r.Title] = true
+			// Count unique episodes
+			uniqueEpisodes := make(map[string]bool)
+			for _, r := range searchResultsForAI {
+				uniqueEpisodes[r.Title] = true
+			}
+			fmt.Printf("  \033[36mDEBUG: Context -> %d chunks from %d unique episodes\033[0m\n", len(searchResultsForAI), len(uniqueEpisodes))
 		}
-		fmt.Printf("  \033[36mDEBUG: Context -> %d chunks from %d unique episodes\033[0m\n", len(searchResultsForAI), len(uniqueEpisodes))
 
 		// Display RAG answer
 		fmt.Println()
