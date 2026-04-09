@@ -194,11 +194,18 @@ Query: %s`, query)
 	return "GENERAL", nil
 }
 
-// ReformulateQuery rewrites a user query using chat history to make it standalone.
+// ReformulateQuery rewrites and expands a user query using chat history to make
+// it standalone and optimised for vector search against the transcript database.
 func ReformulateQuery(ctx context.Context, query string, history []string) (string, error) {
-	// If no history, the query is already standalone
-	if len(history) == 0 {
-		return query, nil
+	// Even with no history, we still want to expand the query for better search
+	historyText := "(No prior conversation)"
+	if len(history) > 0 {
+		var hb strings.Builder
+		for _, h := range history {
+			hb.WriteString(h)
+			hb.WriteString("\n")
+		}
+		historyText = hb.String()
 	}
 
 	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
@@ -224,17 +231,21 @@ func ReformulateQuery(ctx context.Context, query string, history []string) (stri
 		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
-	var historyBuilder strings.Builder
-	for _, h := range history {
-		historyBuilder.WriteString(h)
-		historyBuilder.WriteString("\n")
-	}
+	prompt := fmt.Sprintf(`You are a search query optimizer for a Frasier TV show transcript database. Your goal is to turn the user's question into the best possible vector search terms.
 
-	prompt := fmt.Sprintf(`Given the conversation history below, rewrite the latest user question into a standalone search query that can be understood without the history. If it is already standalone, return it unchanged. Respond with ONLY the rewritten query, nothing else.
+Rules:
+1. If there is conversation history, rewrite the question to be standalone (resolve pronouns like "he", "she", "they" using context).
+2. Expand narrow words into broader search terms to cover the full 11-season history:
+   - "lovers", "dating", "relationships" → expand to include "marriage, wives, ex-wives, husband, romantic interests, significant others, girlfriend, boyfriend, dating, affair"
+   - "jobs", "career" → expand to include "work, profession, employment, fired, hired, promotion, radio show, private practice"
+   - "fights", "arguments" → expand to include "conflict, disagreement, feud, rivalry, confrontation, tension"
+   - "family" → expand to include "father, brother, son, wife, ex-wife, mother, children"
+3. Always include character names if the question implies specific characters.
+4. Respond with ONLY the rewritten/expanded query, nothing else.
 
 Conversation History:
 %s
-Latest Question: %s`, historyBuilder.String(), query)
+Latest Question: %s`, historyText, query)
 
 	temperature := float32(0.0)
 
