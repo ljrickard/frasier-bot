@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -12,16 +13,20 @@ import (
 	"omnicorp-analyst/internal/embeddings"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <search query>\n", os.Args[0])
-		os.Exit(1)
-	}
+const maxHistory = 10
 
-	query := strings.Join(os.Args[1:], " ")
+func main() {
 	ctx := context.Background()
 
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
+
+	// Check for --compare flag
+	compareMode := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--compare" {
+			compareMode = true
+		}
+	}
 
 	if err := embeddings.Preflight(); err != nil {
 		logger.Fatalf("Embedding service preflight check failed: %v", err)
@@ -33,126 +38,170 @@ func main() {
 	}
 	defer db.Close()
 
-	// Step 1: Dynamic Top-K classification
-	logger.Printf("Classifying query: %q", query)
-	classification, err := ai.ClassifyQuery(ctx, query)
-	if err != nil {
-		logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
-		classification = "GENERAL"
-	}
-
-	topK := 10
-	if classification == "SPECIFIC" {
-		topK = 3
-	}
-	logger.Printf("Query classified as %s, Top-K = %d", classification, topK)
-
-	// Step 2a: Generate Vanilla Answer (no context)
-	logger.Println("Generating Vanilla AI answer...")
-	vanillaAnswer, err := ai.GenerateVanillaAnswer(ctx, query)
-	if err != nil {
-		logger.Printf("WARN: failed to generate vanilla answer: %v", err)
-		vanillaAnswer = "(Vanilla answer unavailable)"
-	}
-
-	// Step 2b: RAG search
-	logger.Println("Generating query embedding...")
-	queryEmbedding, err := embeddings.GenerateQueryEmbedding(ctx, query)
-	if err != nil {
-		logger.Fatalf("Failed to generate query embedding: %v", err)
-	}
-
-	results, err := db.SearchArticles(ctx, queryEmbedding, topK)
-	if err != nil {
-		logger.Fatalf("Failed to search articles: %v", err)
-	}
-
-	if len(results) == 0 {
-		logger.Println("No results found.")
-		return
-	}
-
-	// Collect unique parent IDs
-	parentIDSet := make(map[int64]bool)
-	var parentIDs []int64
-	for _, r := range results {
-		if r.ParentID != nil && !parentIDSet[*r.ParentID] {
-			parentIDSet[*r.ParentID] = true
-			parentIDs = append(parentIDs, *r.ParentID)
-		}
-	}
-
-	// Fetch parent chunks
-	var parentResults []database.SearchResult
-	if len(parentIDs) > 0 {
-		parents, err := db.GetParentChunksByIDs(ctx, parentIDs)
-		if err != nil {
-			logger.Fatalf("Failed to fetch parent chunks: %v", err)
-		}
-		for _, p := range parents {
-			parentResults = append(parentResults, database.SearchResult{
-				Title:   fmt.Sprintf("S%02dE%02d: %s", p.Season, p.Episode, p.EpisodeTitle),
-				URL:     p.URL,
-				Content: p.Content,
-			})
-		}
-	}
-
-	searchResultsForAI := parentResults
-	if len(searchResultsForAI) == 0 {
-		searchResultsForAI = results
-	}
-
-	// Generate RAG answer
-	logger.Println("Generating RAG AI answer...")
-	ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI)
-	if err != nil {
-		logger.Fatalf("Failed to generate RAG answer: %v", err)
-	}
-
-	// Step 3: Evaluation
-	logger.Println("Evaluating answers...")
-	evaluation, err := ai.EvaluateAnswers(ctx, query, vanillaAnswer, ragAnswer)
-	if err != nil {
-		logger.Printf("WARN: failed to evaluate answers: %v", err)
-		evaluation = "(Evaluation unavailable)"
-	}
-
-	// Display results
 	sep := strings.Repeat("=", 80)
 
 	fmt.Println()
 	fmt.Println(sep)
-	fmt.Printf("  Search Results for: %q  [%s, Top-K=%d]\n", query, classification, topK)
-	fmt.Println(sep)
-	fmt.Println()
-
-	for i, r := range results {
-		fmt.Printf("  %d. %s (similarity: %.4f)\n", i+1, r.Title, r.Similarity)
+	fmt.Println("  🎧 Frasier Chat Session Started")
+	fmt.Println("  Ask me anything about Frasier! Type 'exit' or 'quit' to end.")
+	if compareMode {
+		fmt.Println("  [Compare Mode ON: Vanilla AI + Evaluation enabled]")
 	}
+	fmt.Println(sep)
+	fmt.Println()
 
-	fmt.Printf("\n  %d child result(s), %d unique parent(s)\n", len(results), len(parentIDs))
+	var chatHistory []string
+	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println()
-	fmt.Println(sep)
-	fmt.Println("  === VANILLA AI (No Database) ===")
-	fmt.Println(sep)
-	fmt.Println()
-	fmt.Println(vanillaAnswer)
+	for {
+		fmt.Print("You: ")
+		if !scanner.Scan() {
+			break
+		}
 
-	fmt.Println()
-	fmt.Println(sep)
-	fmt.Println("  === RAG AI (Frasier Database) ===")
-	fmt.Println(sep)
-	fmt.Println()
-	fmt.Println(ragAnswer)
+		query := strings.TrimSpace(scanner.Text())
+		if query == "" {
+			continue
+		}
 
-	fmt.Println()
-	fmt.Println(sep)
-	fmt.Println("  === EVALUATION ===")
-	fmt.Println(sep)
-	fmt.Println()
-	fmt.Println(evaluation)
-	fmt.Println()
-	fmt.Println(sep)
+		lower := strings.ToLower(query)
+		if lower == "exit" || lower == "quit" {
+			fmt.Println()
+			fmt.Println("Goodbye! Thanks for chatting about Frasier.")
+			break
+		}
+
+		// Step 1: Reformulate query using chat history
+		reformulated, err := ai.ReformulateQuery(ctx, query, chatHistory)
+		if err != nil {
+			logger.Printf("WARN: failed to reformulate query: %v", err)
+			reformulated = query
+		}
+
+		if reformulated != query {
+			logger.Printf("Reformulated: %q -> %q", query, reformulated)
+		}
+
+		// Step 2: Classify the reformulated query for Top-K
+		classification, err := ai.ClassifyQuery(ctx, reformulated)
+		if err != nil {
+			logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
+			classification = "GENERAL"
+		}
+
+		topK := 10
+		if classification == "SPECIFIC" {
+			topK = 3
+		}
+
+		// Step 3: Generate embedding for the reformulated query
+		queryEmbedding, err := embeddings.GenerateQueryEmbedding(ctx, reformulated)
+		if err != nil {
+			logger.Printf("WARN: failed to generate query embedding: %v", err)
+			fmt.Println("\nSorry, I had trouble processing that query. Please try again.\n")
+			continue
+		}
+
+		// Step 4: Search articles (children)
+		results, err := db.SearchArticles(ctx, queryEmbedding, topK)
+		if err != nil {
+			logger.Printf("WARN: failed to search articles: %v", err)
+			fmt.Println("\nSorry, I had trouble searching the database. Please try again.\n")
+			continue
+		}
+
+		if len(results) == 0 {
+			fmt.Println("\nI couldn't find any relevant transcripts for that question.\n")
+			continue
+		}
+
+		// Step 5: Collect unique parent IDs and fetch parent chunks
+		parentIDSet := make(map[int64]bool)
+		var parentIDs []int64
+		for _, r := range results {
+			if r.ParentID != nil && !parentIDSet[*r.ParentID] {
+				parentIDSet[*r.ParentID] = true
+				parentIDs = append(parentIDs, *r.ParentID)
+			}
+		}
+
+		var parentResults []database.SearchResult
+		if len(parentIDs) > 0 {
+			parents, err := db.GetParentChunksByIDs(ctx, parentIDs)
+			if err != nil {
+				logger.Printf("WARN: failed to fetch parent chunks: %v", err)
+			} else {
+				for _, p := range parents {
+					parentResults = append(parentResults, database.SearchResult{
+						Title:   fmt.Sprintf("S%02dE%02d: %s", p.Season, p.Episode, p.EpisodeTitle),
+						URL:     p.URL,
+						Content: p.Content,
+					})
+				}
+			}
+		}
+
+		searchResultsForAI := parentResults
+		if len(searchResultsForAI) == 0 {
+			searchResultsForAI = results
+		}
+
+		// Step 6: Generate RAG answer (use original query for natural response)
+		ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI)
+		if err != nil {
+			logger.Printf("WARN: failed to generate RAG answer: %v", err)
+			fmt.Println("\nSorry, I had trouble generating an answer. Please try again.\n")
+			continue
+		}
+
+		// Display RAG answer
+		fmt.Println()
+		fmt.Println(sep)
+		fmt.Printf("  === RAG AI (Frasier Database) === [%s, Top-K=%d]\n", classification, topK)
+		fmt.Println(sep)
+		fmt.Println()
+		fmt.Println(ragAnswer)
+		fmt.Println()
+
+		// Step 7: Compare mode (optional)
+		if compareMode {
+			vanillaAnswer, err := ai.GenerateVanillaAnswer(ctx, query)
+			if err != nil {
+				logger.Printf("WARN: failed to generate vanilla answer: %v", err)
+				vanillaAnswer = "(Vanilla answer unavailable)"
+			}
+
+			fmt.Println(sep)
+			fmt.Println("  === VANILLA AI (No Database) ===")
+			fmt.Println(sep)
+			fmt.Println()
+			fmt.Println(vanillaAnswer)
+			fmt.Println()
+
+			evaluation, err := ai.EvaluateAnswers(ctx, query, vanillaAnswer, ragAnswer)
+			if err != nil {
+				logger.Printf("WARN: failed to evaluate answers: %v", err)
+				evaluation = "(Evaluation unavailable)"
+			}
+
+			fmt.Println(sep)
+			fmt.Println("  === EVALUATION ===")
+			fmt.Println(sep)
+			fmt.Println()
+			fmt.Println(evaluation)
+			fmt.Println()
+		}
+
+		fmt.Println(sep)
+		fmt.Println()
+
+		// Step 8: Update chat history
+		chatHistory = append(chatHistory, fmt.Sprintf("User: %s", query))
+		chatHistory = append(chatHistory, fmt.Sprintf("Assistant: %s", ragAnswer))
+
+		// Keep only the last maxHistory entries
+		if len(chatHistory) > maxHistory*2 {
+			chatHistory = chatHistory[len(chatHistory)-maxHistory*2:]
+		}
+	}
 }

@@ -118,6 +118,61 @@ Query: %s`, query)
 	return "GENERAL", nil
 }
 
+// ReformulateQuery rewrites a user query using chat history to make it standalone.
+func ReformulateQuery(ctx context.Context, query string, history []string) (string, error) {
+	// If no history, the query is already standalone
+	if len(history) == 0 {
+		return query, nil
+	}
+
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
+	}
+
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = "europe-west2"
+	}
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", err)
+	}
+
+	var historyBuilder strings.Builder
+	for _, h := range history {
+		historyBuilder.WriteString(h)
+		historyBuilder.WriteString("\n")
+	}
+
+	prompt := fmt.Sprintf(`Given the conversation history below, rewrite the latest user question into a standalone search query that can be understood without the history. If it is already standalone, return it unchanged. Respond with ONLY the rewritten query, nothing else.
+
+Conversation History:
+%s
+Latest Question: %s`, historyBuilder.String(), query)
+
+	temperature := float32(0.0)
+
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+		Temperature: &temperature,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to reformulate query: %w", err)
+	}
+
+	result := strings.TrimSpace(extractText(resp))
+	if result == "" {
+		return query, nil
+	}
+
+	return result, nil
+}
+
 // GenerateVanillaAnswer asks Gemini the question with no RAG context.
 func GenerateVanillaAnswer(ctx context.Context, query string) (string, error) {
 	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
