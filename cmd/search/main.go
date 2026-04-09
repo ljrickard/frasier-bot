@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"omnicorp-analyst/internal/ai"
+	"omnicorp-analyst/internal/config"
 	"omnicorp-analyst/internal/database"
 	"omnicorp-analyst/internal/embeddings"
 	"omnicorp-analyst/internal/ui"
@@ -21,13 +22,7 @@ func main() {
 
 	logger := log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lshortfile)
 
-	// Check for --compare flag
-	compareMode := false
-	for _, arg := range os.Args[1:] {
-		if arg == "--compare" {
-			compareMode = true
-		}
-	}
+	cfg := config.ParseFlags()
 
 	if err := embeddings.Preflight(); err != nil {
 		logger.Fatalf("Embedding service preflight check failed: %v", err)
@@ -45,10 +40,9 @@ func main() {
 	fmt.Println(sep)
 	fmt.Println("  🎧 Frasier Chat Session Started")
 	fmt.Println("  Ask me anything about Frasier! Type 'exit' or 'quit' to end.")
-	if compareMode {
-		fmt.Println("  [Compare Mode ON: Vanilla AI + Evaluation enabled]")
-	}
 	fmt.Println(sep)
+	fmt.Println()
+	cfg.PrintStatus()
 	fmt.Println()
 
 	var chatHistory []string
@@ -77,26 +71,38 @@ func main() {
 		spin.Start()
 
 		// Step 1: Reformulate query using chat history
-		reformulated, err := ai.ReformulateQuery(ctx, query, chatHistory)
-		if err != nil {
-			logger.Printf("WARN: failed to reformulate query: %v", err)
+		var reformulated string
+		if cfg.UseExpansion {
+			reformulated, err = ai.ReformulateQuery(ctx, query, chatHistory)
+			if err != nil {
+				logger.Printf("WARN: failed to reformulate query: %v", err)
+				reformulated = query
+			}
+		} else {
 			reformulated = query
 		}
 
 		// Step 2: Classify the reformulated query for Top-K
-		spin.UpdateMessage("Classifying query...")
-		classification, err := ai.ClassifyQuery(ctx, reformulated)
-		if err != nil {
-			logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
-			classification = "GENERAL"
-		}
-
+		var classification string
 		fetchK := 50
 		perEpisodeLimit := 3
 		finalK := 20
-		if classification == "SPECIFIC" {
-			fetchK = 30
-			finalK = 10
+
+		if cfg.UseSwitchboard {
+			spin.UpdateMessage("Classifying query...")
+			classification, err = ai.ClassifyQuery(ctx, reformulated)
+			if err != nil {
+				logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
+				classification = "GENERAL"
+			}
+			if classification == "SPECIFIC" {
+				fetchK = 30
+				finalK = 10
+			}
+		} else {
+			classification = "OFF"
+			fetchK = 5
+			finalK = 5
 		}
 
 		// Step 3: Generate embedding for the reformulated query
@@ -109,8 +115,13 @@ func main() {
 			continue
 		}
 
-		// Step 4: Search articles with diversity capping (children) — fetch wide
-		results, err := db.SearchArticlesDiverse(ctx, queryEmbedding, fetchK, perEpisodeLimit)
+		// Step 4: Search articles (children) — fetch wide
+		var results []database.SearchResult
+		if cfg.UseDiversity {
+			results, err = db.SearchArticlesDiverse(ctx, queryEmbedding, fetchK, perEpisodeLimit)
+		} else {
+			results, err = db.SearchArticles(ctx, queryEmbedding, fetchK)
+		}
 		if err != nil {
 			spin.Stop()
 			logger.Printf("WARN: failed to search articles: %v", err)
@@ -141,11 +152,14 @@ func main() {
 				logger.Printf("WARN: failed to fetch parent chunks: %v", err)
 			} else {
 				for _, p := range parents {
-					enrichedContent := fmt.Sprintf("[S%02dE%02d] %s", p.Season, p.Episode, p.Content)
+					content := p.Content
+					if cfg.UseMetadata {
+						content = fmt.Sprintf("[S%02dE%02d] %s", p.Season, p.Episode, content)
+					}
 					parentResults = append(parentResults, database.SearchResult{
 						Title:   fmt.Sprintf("S%02dE%02d: %s", p.Season, p.Episode, p.EpisodeTitle),
 						URL:     p.URL,
-						Content: enrichedContent,
+						Content: content,
 					})
 				}
 			}
@@ -157,18 +171,22 @@ func main() {
 		}
 
 		// Step 5b: Rerank chunks using LLM scoring
-		spin.UpdateMessage("Reranking results...")
 		preRerankCount := len(searchResultsForAI)
-		reranked, err := ai.RerankChunks(ctx, reformulated, searchResultsForAI, finalK)
-		if err != nil {
-			logger.Printf("WARN: reranker failed, using original order: %v", err)
-		} else {
-			searchResultsForAI = reranked
+		if cfg.UseReranker {
+			spin.UpdateMessage("Reranking results...")
+			reranked, err := ai.RerankChunks(ctx, reformulated, searchResultsForAI, finalK)
+			if err != nil {
+				logger.Printf("WARN: reranker failed, using original order: %v", err)
+			} else {
+				searchResultsForAI = reranked
+			}
+		} else if len(searchResultsForAI) > finalK {
+			searchResultsForAI = searchResultsForAI[:finalK]
 		}
 
 		// Step 6: Generate RAG answer (use original query for natural response)
 		spin.UpdateMessage("Consulting the Crane brothers...")
-		ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI)
+		ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI, cfg.UsePersona)
 		if err != nil {
 			spin.Stop()
 			logger.Printf("WARN: failed to generate RAG answer: %v", err)
@@ -202,7 +220,7 @@ func main() {
 		fmt.Println()
 
 		// Step 7: Compare mode (optional)
-		if compareMode {
+		if cfg.CompareMode {
 			vanillaAnswer, err := ai.GenerateVanillaAnswer(ctx, query)
 			if err != nil {
 				logger.Printf("WARN: failed to generate vanilla answer: %v", err)

@@ -76,7 +76,7 @@ func callWithRetry(ctx context.Context, fn func() (*genai.GenerateContentRespons
 
 // GenerateAnswer takes a user query and a slice of search results,
 // constructs an augmented prompt, and sends it to Gemini for generation.
-func GenerateAnswer(ctx context.Context, query string, articles []database.SearchResult) (string, error) {
+func GenerateAnswer(ctx context.Context, query string, articles []database.SearchResult, usePersona bool) (string, error) {
 	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	if project == "" {
 		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
@@ -111,7 +111,9 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 		contextBuilder.WriteString("\n")
 	}
 
-	prompt := fmt.Sprintf(`You are the ultimate Frasier expert with the wit and vocabulary of the Crane brothers. You must remain strictly factual based on the provided context — never invent information — but present your answers with sophisticated humor and the eloquent flair worthy of a Crane.
+	var prompt string
+	if usePersona {
+		prompt = fmt.Sprintf(`You are the ultimate Frasier expert with the wit and vocabulary of the Crane brothers. You must remain strictly factual based on the provided context — never invent information — but present your answers with sophisticated humor and the eloquent flair worthy of a Crane.
 
 Guidelines:
 - Pay strict attention to the [SxxExx] metadata to determine chronological order. Season 1 is the oldest; Season 11 is the most recent.
@@ -124,6 +126,13 @@ Guidelines:
 Context:
 %s
 Question: %s`, contextBuilder.String(), query)
+	} else {
+		prompt = fmt.Sprintf(`You are a helpful assistant. Answer the user's question using ONLY the provided context below. Do not make up information. If the context does not contain enough information to answer the question, say so.
+
+Context:
+%s
+Question: %s`, contextBuilder.String(), query)
+	}
 
 	temperature := float32(0.2)
 
