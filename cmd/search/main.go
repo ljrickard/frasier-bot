@@ -18,7 +18,7 @@ const maxHistory = 10
 func main() {
 	ctx := context.Background()
 
-	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
+	logger := log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lshortfile)
 
 	// Check for --compare flag
 	compareMode := false

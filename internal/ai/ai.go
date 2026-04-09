@@ -15,6 +15,11 @@ const (
 	geminiModel = "gemini-2.5-flash"
 )
 
+func init() {
+	// Redirect default logger (used by SDKs) to stderr to keep stdout clean
+	log.SetOutput(os.Stderr)
+}
+
 // GenerateAnswer takes a user query and a slice of search results,
 // constructs an augmented prompt, and sends it to Gemini for generation.
 func GenerateAnswer(ctx context.Context, query string, articles []database.SearchResult) (string, error) {
@@ -53,8 +58,6 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 Context:
 %s
 Question: %s`, contextBuilder.String(), query)
-
-	log.Printf("Sending prompt to %s...", geminiModel)
 
 	temperature := float32(0.2)
 
