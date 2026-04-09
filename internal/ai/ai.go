@@ -82,7 +82,7 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = "europe-west2"
+		location = "us-central1"
 	}
 
 	var client *genai.Client
@@ -147,7 +147,7 @@ func ClassifyQuery(ctx context.Context, query string) (string, error) {
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = "europe-west2"
+		location = "us-central1"
 	}
 
 	var client *genai.Client
@@ -201,7 +201,7 @@ func ReformulateQuery(ctx context.Context, query string, history []string) (stri
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = "europe-west2"
+		location = "us-central1"
 	}
 
 	var client *genai.Client
@@ -257,7 +257,7 @@ func GenerateVanillaAnswer(ctx context.Context, query string) (string, error) {
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = "europe-west2"
+		location = "us-central1"
 	}
 
 	var client *genai.Client
@@ -305,7 +305,7 @@ func EvaluateAnswers(ctx context.Context, query, vanillaAnswer, ragAnswer string
 
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
-		location = "europe-west2"
+		location = "us-central1"
 	}
 
 	var client *genai.Client
