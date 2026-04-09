@@ -91,11 +91,12 @@ func main() {
 			classification = "GENERAL"
 		}
 
-		topK := 20
-		perEpisodeLimit := 2
+		fetchK := 50
+		perEpisodeLimit := 3
+		finalK := 20
 		if classification == "SPECIFIC" {
-			topK = 8
-			perEpisodeLimit = 3
+			fetchK = 30
+			finalK = 10
 		}
 
 		// Step 3: Generate embedding for the reformulated query
@@ -108,8 +109,8 @@ func main() {
 			continue
 		}
 
-		// Step 4: Search articles with diversity capping (children)
-		results, err := db.SearchArticlesDiverse(ctx, queryEmbedding, topK, perEpisodeLimit)
+		// Step 4: Search articles with diversity capping (children) — fetch wide
+		results, err := db.SearchArticlesDiverse(ctx, queryEmbedding, fetchK, perEpisodeLimit)
 		if err != nil {
 			spin.Stop()
 			logger.Printf("WARN: failed to search articles: %v", err)
@@ -155,6 +156,16 @@ func main() {
 			searchResultsForAI = results
 		}
 
+		// Step 5b: Rerank chunks using LLM scoring
+		spin.UpdateMessage("Reranking results...")
+		preRerankCount := len(searchResultsForAI)
+		reranked, err := ai.RerankChunks(ctx, reformulated, searchResultsForAI, finalK)
+		if err != nil {
+			logger.Printf("WARN: reranker failed, using original order: %v", err)
+		} else {
+			searchResultsForAI = reranked
+		}
+
 		// Step 6: Generate RAG answer (use original query for natural response)
 		spin.UpdateMessage("Consulting the Crane brothers...")
 		ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI)
@@ -171,8 +182,15 @@ func main() {
 		if reformulated != query {
 			fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", reformulated)
 		}
-		fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Top-K=%d, PerEpisode=%d]\033[0m\n", classification, topK, perEpisodeLimit)
-		fmt.Printf("  \033[36mDEBUG: Context -> %d parent chunks from %d diverse results\033[0m\n", len(parentIDs), len(results))
+		fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Fetch=%d, Final=%d, PerEpisode=%d]\033[0m\n", classification, fetchK, finalK, perEpisodeLimit)
+		fmt.Printf("  \033[36mDEBUG: Reranker kept %d out of %d chunks\033[0m\n", len(searchResultsForAI), preRerankCount)
+
+		// Count unique episodes
+		uniqueEpisodes := make(map[string]bool)
+		for _, r := range searchResultsForAI {
+			uniqueEpisodes[r.Title] = true
+		}
+		fmt.Printf("  \033[36mDEBUG: Context -> %d chunks from %d unique episodes\033[0m\n", len(searchResultsForAI), len(uniqueEpisodes))
 
 		// Display RAG answer
 		fmt.Println()

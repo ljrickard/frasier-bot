@@ -2,11 +2,13 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -374,6 +376,141 @@ Based on the RAG AI's context-grounded answer, did the Vanilla AI get anything w
 	}
 
 	return result, nil
+}
+
+// RerankChunk holds a chunk's index, content, and reranker score.
+type RerankChunk struct {
+	Index    int
+	Title    string
+	URL      string
+	Content  string
+	ParentID *int64
+	Score    float64
+}
+
+// RerankChunks sends the query and candidate chunks to Gemini to score
+// each chunk's relevance, then returns the top-N chunks sorted by score.
+func RerankChunks(ctx context.Context, query string, chunks []database.SearchResult, topN int) ([]database.SearchResult, error) {
+	if len(chunks) <= topN {
+		return chunks, nil
+	}
+
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		return nil, fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
+	}
+
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = "us-central1"
+	}
+
+	var client *genai.Client
+	var clientErr error
+	suppressSDKWarnings(func() {
+		client, clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			Project:  project,
+			Location: location,
+			Backend:  genai.BackendVertexAI,
+		})
+	})
+	if clientErr != nil {
+		return nil, fmt.Errorf("failed to create genai client: %w", clientErr)
+	}
+
+	// Build chunk list for the prompt
+	var chunkList strings.Builder
+	for i, c := range chunks {
+		// Truncate content to first 500 chars to stay within token limits
+		content := c.Content
+		if len(content) > 500 {
+			content = content[:500] + "..."
+		}
+		chunkList.WriteString(fmt.Sprintf("Chunk %d:\n%s\n\n", i, content))
+	}
+
+	prompt := fmt.Sprintf(`You are a relevance grader for a Frasier TV show transcript search engine.
+
+Read the user's query and the following text chunks. Score each chunk from 0.0 to 1.0 based strictly on how well it helps answer the query. A score of 1.0 means the chunk directly answers the query; 0.0 means it is completely irrelevant.
+
+Return ONLY a valid JSON array with objects containing "id" (the chunk number) and "score" (a float). No other text.
+
+Example response:
+[{"id": 0, "score": 0.9}, {"id": 1, "score": 0.2}]
+
+User Query: %s
+
+Chunks:
+%s`, query, chunkList.String())
+
+	temperature := float32(0.0)
+
+	resp, err := callWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
+		return client.Models.GenerateContent(ctx, geminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to rerank chunks: %w", err)
+	}
+
+	result := strings.TrimSpace(extractText(resp))
+
+	// Parse the JSON response
+	type scoreEntry struct {
+		ID    int     `json:"id"`
+		Score float64 `json:"score"`
+	}
+
+	// Strip markdown code fences if present
+	result = strings.TrimPrefix(result, "```json")
+	result = strings.TrimPrefix(result, "```")
+	result = strings.TrimSuffix(result, "```")
+	result = strings.TrimSpace(result)
+
+	var scores []scoreEntry
+	if err := json.Unmarshal([]byte(result), &scores); err != nil {
+		// If parsing fails, fall back to original order
+		log.Printf("WARN: reranker JSON parse failed, using original order: %v", err)
+		if len(chunks) > topN {
+			return chunks[:topN], nil
+		}
+		return chunks, nil
+	}
+
+	// Sort by score descending
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].Score > scores[j].Score
+	})
+
+	// Pick top-N valid entries
+	var reranked []database.SearchResult
+	for _, s := range scores {
+		if s.ID >= 0 && s.ID < len(chunks) {
+			reranked = append(reranked, chunks[s.ID])
+		}
+		if len(reranked) >= topN {
+			break
+		}
+	}
+
+	// If reranking produced too few results, pad with originals
+	if len(reranked) < topN {
+		seen := make(map[int]bool)
+		for _, s := range scores {
+			seen[s.ID] = true
+		}
+		for i, c := range chunks {
+			if !seen[i] {
+				reranked = append(reranked, c)
+			}
+			if len(reranked) >= topN {
+				break
+			}
+		}
+	}
+
+	return reranked, nil
 }
 
 func extractText(resp *genai.GenerateContentResponse) string {
