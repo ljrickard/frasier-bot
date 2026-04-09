@@ -92,8 +92,10 @@ func main() {
 		}
 
 		topK := 20
+		perEpisodeLimit := 2
 		if classification == "SPECIFIC" {
 			topK = 8
+			perEpisodeLimit = 3
 		}
 
 		// Step 3: Generate embedding for the reformulated query
@@ -106,8 +108,8 @@ func main() {
 			continue
 		}
 
-		// Step 4: Search articles (children)
-		results, err := db.SearchArticles(ctx, queryEmbedding, topK)
+		// Step 4: Search articles with diversity capping (children)
+		results, err := db.SearchArticlesDiverse(ctx, queryEmbedding, topK, perEpisodeLimit)
 		if err != nil {
 			spin.Stop()
 			logger.Printf("WARN: failed to search articles: %v", err)
@@ -169,8 +171,8 @@ func main() {
 		if reformulated != query {
 			fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", reformulated)
 		}
-		fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Top-K=%d]\033[0m\n", classification, topK)
-		fmt.Printf("  \033[36mDEBUG: Context -> %d parent chunks from %d results\033[0m\n", len(parentIDs), len(results))
+		fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Top-K=%d, PerEpisode=%d]\033[0m\n", classification, topK, perEpisodeLimit)
+		fmt.Printf("  \033[36mDEBUG: Context -> %d parent chunks from %d diverse results\033[0m\n", len(parentIDs), len(results))
 
 		// Display RAG answer
 		fmt.Println()

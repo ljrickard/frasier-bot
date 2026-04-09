@@ -196,6 +196,59 @@ func (db *DB) SearchArticles(ctx context.Context, queryEmbedding []float32, limi
 	return results, nil
 }
 
+// SearchArticlesDiverse retrieves the top-K semantically similar articles but
+// limits results to at most perEpisodeLimit chunks per (season, episode) pair,
+// ensuring the context window spans a diverse range of episodes rather than
+// being dominated by a single highly-matching episode.
+func (db *DB) SearchArticlesDiverse(ctx context.Context, queryEmbedding []float32, limit int, perEpisodeLimit int) ([]SearchResult, error) {
+	vec := pgvector.NewVector(queryEmbedding)
+
+	// Fetch a larger candidate pool so we have enough to fill `limit` slots
+	// after per-episode capping. A multiplier of 5x is generous but bounded.
+	candidateLimit := limit * 5
+
+	query := `
+		SELECT title, source, content, parent_id, season, episode, 1 - (embedding <=> $1) AS similarity
+		FROM articles
+		WHERE embedding IS NOT NULL
+		ORDER BY embedding <=> $1
+		LIMIT $2`
+
+	rows, err := db.Pool.Query(ctx, query, vec, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search articles (diverse): %w", err)
+	}
+	defer rows.Close()
+
+	type candidateRow struct {
+		SearchResult
+		season  int
+		episode int
+	}
+
+	episodeCounts := make(map[[2]int]int)
+	var results []SearchResult
+
+	for rows.Next() {
+		var c candidateRow
+		if err := rows.Scan(&c.Title, &c.URL, &c.Content, &c.ParentID, &c.season, &c.episode, &c.Similarity); err != nil {
+			return nil, fmt.Errorf("failed to scan search result (diverse): %w", err)
+		}
+
+		key := [2]int{c.season, c.episode}
+		if episodeCounts[key] < perEpisodeLimit {
+			episodeCounts[key]++
+			results = append(results, c.SearchResult)
+		}
+
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	return results, nil
+}
+
 // HasArticlesForSource checks if any articles already exist for a given source URL.
 func (db *DB) HasArticlesForSource(ctx context.Context, source string) (bool, error) {
 	var exists bool
