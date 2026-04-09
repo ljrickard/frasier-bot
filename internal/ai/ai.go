@@ -163,7 +163,14 @@ func ClassifyQuery(ctx context.Context, query string) (string, error) {
 		return "", fmt.Errorf("failed to create genai client: %w", clientErr)
 	}
 
-	prompt := fmt.Sprintf(`Classify this query as 'SPECIFIC' (asking for a name, date, or quote) or 'GENERAL' (asking for a summary or theme). Respond with only one word.
+	prompt := fmt.Sprintf(`Classify this query as 'SPECIFIC' or 'GENERAL'.
+
+SPECIFIC: asking for a single name, exact date, or a direct quote from one scene.
+GENERAL: asking for a summary, theme, character history, relationship arc, or anything spanning multiple episodes.
+
+IMPORTANT: Questions about character history, "how many", "who did they date", "list of", "all the times", or any question that could span multiple episodes or seasons MUST be classified as GENERAL to ensure we capture the entire 11-season timeline.
+
+Respond with only one word: SPECIFIC or GENERAL.
 
 Query: %s`, query)
 

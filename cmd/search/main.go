@@ -11,6 +11,7 @@ import (
 	"omnicorp-analyst/internal/ai"
 	"omnicorp-analyst/internal/database"
 	"omnicorp-analyst/internal/embeddings"
+	"omnicorp-analyst/internal/ui"
 )
 
 const maxHistory = 10
@@ -71,6 +72,10 @@ func main() {
 			break
 		}
 
+		// Start spinner for the entire processing pipeline
+		spin := ui.NewSpinner("Analyzing query...")
+		spin.Start()
+
 		// Step 1: Reformulate query using chat history
 		reformulated, err := ai.ReformulateQuery(ctx, query, chatHistory)
 		if err != nil {
@@ -78,25 +83,24 @@ func main() {
 			reformulated = query
 		}
 
-		if reformulated != query {
-			logger.Printf("Reformulated: %q -> %q", query, reformulated)
-		}
-
 		// Step 2: Classify the reformulated query for Top-K
+		spin.UpdateMessage("Classifying query...")
 		classification, err := ai.ClassifyQuery(ctx, reformulated)
 		if err != nil {
 			logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
 			classification = "GENERAL"
 		}
 
-		topK := 10
+		topK := 20
 		if classification == "SPECIFIC" {
-			topK = 3
+			topK = 8
 		}
 
 		// Step 3: Generate embedding for the reformulated query
+		spin.UpdateMessage("Searching transcripts...")
 		queryEmbedding, err := embeddings.GenerateQueryEmbedding(ctx, reformulated)
 		if err != nil {
+			spin.Stop()
 			logger.Printf("WARN: failed to generate query embedding: %v", err)
 			fmt.Println("\nSorry, I had trouble processing that query. Please try again.\n")
 			continue
@@ -105,12 +109,14 @@ func main() {
 		// Step 4: Search articles (children)
 		results, err := db.SearchArticles(ctx, queryEmbedding, topK)
 		if err != nil {
+			spin.Stop()
 			logger.Printf("WARN: failed to search articles: %v", err)
 			fmt.Println("\nSorry, I had trouble searching the database. Please try again.\n")
 			continue
 		}
 
 		if len(results) == 0 {
+			spin.Stop()
 			fmt.Println("\nI couldn't find any relevant transcripts for that question.\n")
 			continue
 		}
@@ -148,17 +154,28 @@ func main() {
 		}
 
 		// Step 6: Generate RAG answer (use original query for natural response)
+		spin.UpdateMessage("Consulting the Crane brothers...")
 		ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI)
 		if err != nil {
+			spin.Stop()
 			logger.Printf("WARN: failed to generate RAG answer: %v", err)
 			fmt.Println("\nSorry, I had trouble generating an answer. Please try again.\n")
 			continue
 		}
 
+		spin.Stop()
+
+		// Print debug info after spinner is cleared
+		if reformulated != query {
+			fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", reformulated)
+		}
+		fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Top-K=%d]\033[0m\n", classification, topK)
+		fmt.Printf("  \033[36mDEBUG: Context -> %d parent chunks from %d results\033[0m\n", len(parentIDs), len(results))
+
 		// Display RAG answer
 		fmt.Println()
 		fmt.Println(sep)
-		fmt.Printf("  === RAG AI (Frasier Database) === [%s, Top-K=%d]\n", classification, topK)
+		fmt.Printf("  === RAG AI (Frasier Database) ===\n")
 		fmt.Println(sep)
 		fmt.Println()
 		fmt.Println(ragAnswer)
