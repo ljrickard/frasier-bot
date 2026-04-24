@@ -1,4 +1,4 @@
-module omnicorp-analyst
+module frasier-bot
 
 go 1.26.1
 

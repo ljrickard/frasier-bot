@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"frasier-bot/internal/database"
+
 	"google.golang.org/genai"
-	"omnicorp-analyst/internal/database"
 )
 
 const (

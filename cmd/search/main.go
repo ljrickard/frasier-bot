@@ -8,11 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"omnicorp-analyst/internal/ai"
-	"omnicorp-analyst/internal/config"
-	"omnicorp-analyst/internal/database"
-	"omnicorp-analyst/internal/embeddings"
-	"omnicorp-analyst/internal/ui"
+	"frasier-bot/internal/ai"
+	"frasier-bot/internal/config"
+	"frasier-bot/internal/database"
+	"frasier-bot/internal/embeddings"
+	"frasier-bot/internal/ui"
 )
 
 const maxHistory = 10

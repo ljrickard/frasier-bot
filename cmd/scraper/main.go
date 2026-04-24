@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"omnicorp-analyst/internal/database"
-	"omnicorp-analyst/internal/embeddings"
-	"omnicorp-analyst/internal/models"
-	"omnicorp-analyst/internal/scraper"
+	"frasier-bot/internal/database"
+	"frasier-bot/internal/embeddings"
+	"frasier-bot/internal/models"
+	"frasier-bot/internal/scraper"
 )
 
 const numWorkers = 5

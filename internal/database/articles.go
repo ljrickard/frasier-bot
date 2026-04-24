@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"frasier-bot/internal/models"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/pgvector/pgvector-go"
-	"omnicorp-analyst/internal/models"
 )
 
 func (db *DB) CreateArticle(ctx context.Context, article *models.Article) error {

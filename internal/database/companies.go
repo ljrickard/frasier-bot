@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"omnicorp-analyst/internal/models"
+	"frasier-bot/internal/models"
 )
 
 func (db *DB) CreateCompany(ctx context.Context, company *models.Company) error {
