@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"frasier-bot/internal/database"
+	"frasier-bot/internal/models"
 
 	"google.golang.org/genai"
 )
@@ -77,7 +77,7 @@ func callWithRetry(ctx context.Context, fn func() (*genai.GenerateContentRespons
 
 // GenerateAnswer takes a user query and a slice of search results,
 // constructs an augmented prompt, and sends it to Gemini for generation.
-func GenerateAnswer(ctx context.Context, query string, articles []database.SearchResult, usePersona bool) (string, error) {
+func GenerateAnswer(ctx context.Context, query string, chunks []models.SearchResult, usePersona bool) (string, error) {
 	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	if project == "" {
 		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable is not set")
@@ -103,12 +103,13 @@ func GenerateAnswer(ctx context.Context, query string, articles []database.Searc
 
 	// Augmentation: build the prompt
 	var contextBuilder strings.Builder
-	for i, a := range articles {
-		contextBuilder.WriteString(fmt.Sprintf("Article %d:\n", i+1))
-		contextBuilder.WriteString(fmt.Sprintf("Title: %s\n", a.Title))
-		contextBuilder.WriteString(fmt.Sprintf("URL: %s\n", a.URL))
-		contextBuilder.WriteString(fmt.Sprintf("Content: %s\n", a.Content))
-		contextBuilder.WriteString(fmt.Sprintf("Similarity: %.4f\n", a.Similarity))
+	for i, c := range chunks {
+		contextBuilder.WriteString(fmt.Sprintf("Chunk %d:\n", i+1))
+		// Inject the Season and Episode metadata here!
+		contextBuilder.WriteString(fmt.Sprintf("Episode: %s [S%02dE%02d]\n", c.Title, c.Season, c.Episode))
+		contextBuilder.WriteString(fmt.Sprintf("URL: %s\n", c.URL))
+		contextBuilder.WriteString(fmt.Sprintf("Content: %s\n", c.Content))
+		contextBuilder.WriteString(fmt.Sprintf("Similarity: %.4f\n", c.Similarity))
 		contextBuilder.WriteString("\n")
 	}
 
@@ -400,7 +401,7 @@ type RerankChunk struct {
 
 // RerankChunks sends the query and candidate chunks to Gemini to score
 // each chunk's relevance, then returns the top-N chunks sorted by score.
-func RerankChunks(ctx context.Context, query string, chunks []database.SearchResult, topN int) ([]database.SearchResult, error) {
+func RerankChunks(ctx context.Context, query string, chunks []models.SearchResult, topN int) ([]models.SearchResult, error) {
 	if len(chunks) <= topN {
 		return chunks, nil
 	}
@@ -494,7 +495,7 @@ Chunks:
 	})
 
 	// Pick top-N valid entries
-	var reranked []database.SearchResult
+	var reranked []models.SearchResult
 	for _, s := range scores {
 		if s.ID >= 0 && s.ID < len(chunks) {
 			reranked = append(reranked, chunks[s.ID])

@@ -1,40 +1,51 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
-type Company struct {
+// Show represents a TV series (e.g., "Frasier")
+type Show struct {
 	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Ticker      string    `json:"ticker"`
-	Sector      string    `json:"sector,omitempty"`
+	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at_utc"`
 	UpdatedAt   time.Time `json:"updated_at_utc"`
 }
 
+// ParentChunk represents a full transcript of a scene or episode.
 type ParentChunk struct {
 	ID           int64  `json:"id"`
+	ShowID       int64  `json:"show_id"`
 	Content      string `json:"content"`
 	Season       int    `json:"season"`
 	Episode      int    `json:"episode"`
-	EpisodeTitle string `json:"episode_title"`
-	URL          string `json:"url"`
+	EpisodeTitle string `json:"episode_title,omitempty"`
+	URL          string `json:"url,omitempty"`
 }
 
-type Article struct {
-	ID               int64      `json:"id"`
-	CompanyID        int64      `json:"company_id"`
-	Title            string     `json:"title"`
-	Content          string     `json:"content,omitempty"`
-	Source           string     `json:"source,omitempty"`
-	ParentID         *int64     `json:"parent_id,omitempty"`
-	Season           int        `json:"season,omitempty"`
-	Episode          int        `json:"episode,omitempty"`
-	EpisodeTitle     string     `json:"episode_title,omitempty"`
-	Metadata         *string    `json:"metadata,omitempty"`
-	PublishedAt      *time.Time `json:"published_at,omitempty"`
-	PublishedAtLocal *string    `json:"published_at_local,omitempty"`
-	CreatedAt        time.Time  `json:"created_at_utc"`
-	UpdatedAt        time.Time  `json:"updated_at_utc"`
-	Embedding        []float32  `json:"embedding,omitempty"`
+// Chunk represents a small, embeddable segment of dialogue.
+type Chunk struct {
+	ID           int64                  `json:"id"`
+	ShowID       int64                  `json:"show_id"`
+	ParentID     *int64                 `json:"parent_id,omitempty"`
+	Content      string                 `json:"content"`
+	Embedding    []float32              `json:"embedding,omitempty"`
+	Season       int                    `json:"season"`
+	Episode      int                    `json:"episode"`
+	EpisodeTitle string                 `json:"episode_title,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"` // For storing JSONB data like characters speaking
+	CreatedAt    time.Time              `json:"created_at_utc"`
+	UpdatedAt    time.Time              `json:"updated_at_utc"`
+}
+
+// SearchResult holds a single semantic search result returned by pgvector.
+type SearchResult struct {
+	Title      string  `json:"title"` // Corresponds to episode_title
+	URL        string  `json:"url,omitempty"`
+	Content    string  `json:"content"`
+	ParentID   *int64  `json:"parent_id,omitempty"`
+	Similarity float64 `json:"similarity"`
+	Season     int     `json:"season"`
+	Episode    int     `json:"episode"`
 }

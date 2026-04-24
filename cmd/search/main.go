@@ -12,6 +12,7 @@ import (
 	"frasier-bot/internal/config"
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/embeddings"
+	"frasier-bot/internal/models"
 	"frasier-bot/internal/ui"
 )
 
@@ -116,11 +117,11 @@ func main() {
 		}
 
 		// Step 4: Search articles (children) — fetch wide
-		var results []database.SearchResult
+		var results []models.SearchResult
 		if cfg.UseDiversity {
-			results, err = db.SearchArticlesDiverse(ctx, queryEmbedding, fetchK, perEpisodeLimit)
+			results, err = db.SearchChunksDiverse(ctx, queryEmbedding, fetchK, perEpisodeLimit)
 		} else {
-			results, err = db.SearchArticles(ctx, queryEmbedding, fetchK)
+			results, err = db.SearchChunks(ctx, queryEmbedding, fetchK)
 		}
 		if err != nil {
 			spin.Stop()
@@ -145,7 +146,7 @@ func main() {
 			}
 		}
 
-		var parentResults []database.SearchResult
+		var parentResults []models.SearchResult
 		if len(parentIDs) > 0 {
 			parents, err := db.GetParentChunksByIDs(ctx, parentIDs)
 			if err != nil {
@@ -156,7 +157,7 @@ func main() {
 					if cfg.UseMetadata {
 						content = fmt.Sprintf("[S%02dE%02d] %s", p.Season, p.Episode, content)
 					}
-					parentResults = append(parentResults, database.SearchResult{
+					parentResults = append(parentResults, models.SearchResult{
 						Title:   fmt.Sprintf("S%02dE%02d: %s", p.Season, p.Episode, p.EpisodeTitle),
 						URL:     p.URL,
 						Content: content,

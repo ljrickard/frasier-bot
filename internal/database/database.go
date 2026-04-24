@@ -48,50 +48,30 @@ func (db *DB) Close() {
 }
 
 func (db *DB) RunMigrations(ctx context.Context) error {
+	// 1. Ensure pgvector is installed
 	_, err := db.Pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`)
 	if err != nil {
 		return fmt.Errorf("failed to create vector extension: %w", err)
 	}
 
+	// 2. Create Shows Table
 	_, err = db.Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS companies (
-			id             BIGSERIAL PRIMARY KEY,
-			name           TEXT NOT NULL,
-			ticker         TEXT,
-			sector         TEXT,
-			description    TEXT,
-			created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		CREATE TABLE IF NOT EXISTS shows (
+			id              BIGSERIAL PRIMARY KEY,
+			title           TEXT NOT NULL UNIQUE,
+			description     TEXT,
+			created_at_utc  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at_utc  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`)
 	if err != nil {
-		return fmt.Errorf("failed to create companies table: %w", err)
+		return fmt.Errorf("failed to create shows table: %w", err)
 	}
 
-	// Ignore error if constraint already exists
-	_, _ = db.Pool.Exec(ctx, `
-		ALTER TABLE companies
-		ADD CONSTRAINT companies_name_unique UNIQUE (name)`)
-
-	_, err = db.Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS articles (
-			id                BIGSERIAL PRIMARY KEY,
-			company_id        BIGINT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-			title             TEXT NOT NULL,
-			content           TEXT,
-			source            TEXT,
-			published_at      TIMESTAMPTZ,
-			published_at_local TEXT,
-			embedding         vector(768),
-			created_at_utc    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at_utc    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`)
-	if err != nil {
-		return fmt.Errorf("failed to create articles table: %w", err)
-	}
-
+	// 3. Create Parent Chunks Table (Full episodes/scenes)
 	_, err = db.Pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS parent_chunks (
 			id            BIGSERIAL PRIMARY KEY,
+			show_id       BIGINT NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
 			content       TEXT NOT NULL,
 			season        INTEGER,
 			episode       INTEGER,
@@ -102,21 +82,36 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 		return fmt.Errorf("failed to create parent_chunks table: %w", err)
 	}
 
-	// Add new columns for series metadata (idempotent)
-	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS season INTEGER`)
-	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS episode INTEGER`)
-	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS episode_title TEXT`)
-	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS metadata JSONB`)
-	_, _ = db.Pool.Exec(ctx, `ALTER TABLE articles ADD COLUMN IF NOT EXISTS parent_id BIGINT REFERENCES parent_chunks(id)`)
+	// 4. Create Chunks Table (Embeddable dialogue segments)
+	_, err = db.Pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS chunks (
+			id                 BIGSERIAL PRIMARY KEY,
+			show_id            BIGINT NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+			parent_id          BIGINT REFERENCES parent_chunks(id) ON DELETE CASCADE,
+			content            TEXT NOT NULL,
+			embedding          vector(768),
+			season             INTEGER,
+			episode            INTEGER,
+			episode_title      TEXT,
+			metadata           JSONB,
+			created_at_utc     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at_utc     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`)
+	if err != nil {
+		return fmt.Errorf("failed to create chunks table: %w", err)
+	}
+
+	// 5. Create Indexes for performance
+	_, _ = db.Pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_chunks_show_id ON chunks(show_id)`)
 
 	return nil
 }
 
-// ClearDatabase drops all data from articles, parent_chunks, and companies tables.
+// ClearDatabase updated to drop all data from the new tables
 func (db *DB) ClearDatabase(ctx context.Context) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM articles`)
+	_, err := db.Pool.Exec(ctx, `DELETE FROM chunks`)
 	if err != nil {
-		return fmt.Errorf("failed to clear articles: %w", err)
+		return fmt.Errorf("failed to clear chunks: %w", err)
 	}
 
 	_, err = db.Pool.Exec(ctx, `DELETE FROM parent_chunks`)
@@ -124,9 +119,9 @@ func (db *DB) ClearDatabase(ctx context.Context) error {
 		return fmt.Errorf("failed to clear parent_chunks: %w", err)
 	}
 
-	_, err = db.Pool.Exec(ctx, `DELETE FROM companies`)
+	_, err = db.Pool.Exec(ctx, `DELETE FROM shows`)
 	if err != nil {
-		return fmt.Errorf("failed to clear companies: %w", err)
+		return fmt.Errorf("failed to clear shows: %w", err)
 	}
 
 	return nil

@@ -61,15 +61,15 @@ func main() {
 	}
 	logger.Println("Embedding service configured correctly.")
 
-	show := &models.Company{
-		Name:        "Frasier",
-		Ticker:      "FRASIER",
+	// --- PIVOT: Create the TV Show instead of a Company ---
+	show := &models.Show{
+		Title:       "Frasier",
 		Description: "Frasier TV Show Transcripts",
 	}
-	if err := db.GetOrCreateCompany(ctx, show); err != nil {
+	if err := db.GetOrCreateShow(ctx, show); err != nil {
 		logger.Fatalf("Failed to get or create show: %v", err)
 	}
-	logger.Printf("Using company id=%d name=%q", show.ID, show.Name)
+	logger.Printf("Using show id=%d title=%q", show.ID, show.Title)
 
 	if scraper.RootURL == "" {
 		logger.Fatalf("scraper.RootURL is not set")
@@ -106,9 +106,10 @@ func main() {
 	var toIngest []scraper.EpisodeInfo
 	totalSkipped := 0
 	for _, ep := range episodes {
-		exists, err := db.HasArticlesForSource(ctx, ep.URL)
+		// --- PIVOT: Check for existing episode transcript by URL ---
+		exists, err := db.HasParentChunkForURL(ctx, ep.URL)
 		if err != nil {
-			logger.Printf("WARN: failed to check existing articles for %s: %v", ep.URL, err)
+			logger.Printf("WARN: failed to check existing transcripts for %s: %v", ep.URL, err)
 			continue
 		}
 		if exists {
@@ -136,6 +137,7 @@ func main() {
 	var wg sync.WaitGroup
 	for w := 1; w <= numWorkers; w++ {
 		wg.Add(1)
+		// --- PIVOT: Pass show.ID to the worker ---
 		go worker(ctx, w, logger, db, sc, show.ID, jobs, &wg, &totalIngested)
 	}
 
@@ -144,7 +146,7 @@ func main() {
 	logger.Printf("Done. Ingested %d episodes, skipped %d.", totalIngested.Load(), totalSkipped)
 }
 
-func worker(ctx context.Context, id int, logger *log.Logger, db *database.DB, sc *scraper.Scraper, companyID int64, jobs <-chan job, wg *sync.WaitGroup, totalIngested *atomic.Int64) {
+func worker(ctx context.Context, id int, logger *log.Logger, db *database.DB, sc *scraper.Scraper, showID int64, jobs <-chan job, wg *sync.WaitGroup, totalIngested *atomic.Int64) {
 	defer wg.Done()
 
 	prefix := fmt.Sprintf("[Worker %d]", id)
@@ -165,6 +167,7 @@ func worker(ctx context.Context, id int, logger *log.Logger, db *database.DB, sc
 		saved := 0
 		for i, pc := range result.Chunks {
 			parent := &models.ParentChunk{
+				ShowID:       showID,
 				Content:      pc.ParentContent,
 				Season:       ep.Season,
 				Episode:      ep.Episode,
@@ -177,19 +180,16 @@ func worker(ctx context.Context, id int, logger *log.Logger, db *database.DB, sc
 			}
 
 			for k, child := range pc.Children {
-				partTitle := fmt.Sprintf("%s: %s (Part %d.%d)", seasonEp, ep.EpisodeTitle, i+1, k+1)
-
 				embedding, err := embeddings.GenerateEmbedding(ctx, child)
 				if err != nil {
 					logger.Printf("%s WARN: embedding failed for %s chunk %d.%d: %v", prefix, seasonEp, i+1, k+1, err)
 					continue
 				}
 
-				a := &models.Article{
-					CompanyID:    companyID,
-					Title:        partTitle,
+				// --- PIVOT: Create Chunk instead of Article ---
+				c := &models.Chunk{
+					ShowID:       showID,
 					Content:      child,
-					Source:       ep.URL,
 					Embedding:    embedding,
 					Season:       ep.Season,
 					Episode:      ep.Episode,
@@ -197,7 +197,7 @@ func worker(ctx context.Context, id int, logger *log.Logger, db *database.DB, sc
 					ParentID:     &parent.ID,
 				}
 
-				if err := db.CreateArticle(ctx, a); err != nil {
+				if err := db.CreateChunk(ctx, c); err != nil {
 					logger.Printf("%s WARN: failed to save %s chunk %d.%d: %v", prefix, seasonEp, i+1, k+1, err)
 					continue
 				}
