@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -14,7 +15,7 @@ type RAGConfig struct {
 	UseExpansion   bool
 	UseReranker    bool
 	UsePersona     bool
-	CompareMode    bool
+	NoRAGMode      bool
 	Debug          bool
 }
 
@@ -22,16 +23,19 @@ type RAGConfig struct {
 func ParseFlags() *RAGConfig {
 	cfg := &RAGConfig{}
 
-	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords to match broader user intent")
-	flag.BoolVar(&cfg.UseSwitchboard, "switchboard", true, "Dynamically adjust Top-K context size based on query type")
-	flag.BoolVar(&cfg.UseDiversity, "diversity", true, "Force search results to span multiple different episodes")
-	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Inject [SxxExx] tags for chronological awareness")
-	flag.BoolVar(&cfg.UseReranker, "reranker", true, "Use LLM to grade and re-sort search results for accuracy")
-	flag.BoolVar(&cfg.UsePersona, "persona", true, "Apply the Frasier/Crane brother persona to the final output")
-	flag.BoolVar(&cfg.CompareMode, "compare", false, "Enable compare mode: Vanilla AI + Evaluation")
-	flag.BoolVar(&cfg.Debug, "debug", false, "Enable verbose debug logging in the terminal")
+	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords...")
+	// ... (rest of your flags)
+	flag.BoolVar(&cfg.NoRAGMode, "compare", false, "Enable compare mode: Vanilla AI + Evaluation")
+	flag.BoolVar(&cfg.Debug, "debug", false, "Enable verbose debug logging")
 
 	flag.Parse()
+
+	// THE FIX: Strict validation for Compare Mode
+	if cfg.NoRAGMode {
+		if cfg.UseExpansion || cfg.UseSwitchboard || cfg.UseDiversity || cfg.UseMetadata || cfg.UseReranker || cfg.UsePersona {
+			log.Fatal("🚨 ERROR: Compare Mode (-compare) must be run completely vanilla. You must disable all other features (e.g., -reranker=false -persona=false).")
+		}
+	}
 	return cfg
 }
 
@@ -47,7 +51,7 @@ func (c *RAGConfig) PrintStatus() {
 		{"Metadata Prefixing", c.UseMetadata},
 		{"Semantic Reranker", c.UseReranker},
 		{"Frasier Persona", c.UsePersona},
-		{"Compare Mode", c.CompareMode},
+		{"No RAG Mode", c.NoRAGMode},
 		{"Debug Logging", c.Debug},
 	}
 

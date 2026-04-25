@@ -10,6 +10,7 @@ import (
 	"frasier-bot/internal/config"
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/embeddings"
+	"frasier-bot/internal/search"
 )
 
 func main() {
@@ -45,5 +46,5 @@ func main() {
 	fmt.Println()
 
 	// Kick off the interactive loop
-	startChatLoop(ctx, db, cfg, logger)
+	search.StartChatLoop(ctx, db, cfg, logger)
 }

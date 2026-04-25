@@ -1,4 +1,4 @@
-package main
+package search
 
 import (
 	"bytes"
@@ -38,7 +38,7 @@ func EvaluateInteraction(question string, contexts []string, answer string) (map
 
 	// 30-second timeout to ensure the chat doesn't hang forever if the Python server is slow
 	client := &http.Client{Timeout: 600 * time.Second}
-	resp, err := client.Post("http://0.0.0.0:8000/evaluate", "application/json", bytes.NewBuffer(body))
+	resp, err := client.Post("http://127.0.0.1:8000/evaluate", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to evaluation server: %w", err)
 	}
