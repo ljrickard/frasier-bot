@@ -51,20 +51,23 @@ func toValidUTF8(s string) string {
 }
 
 // cleanTranscript removes navigation/header/footer lines and finds where
-// the real transcript data begins.
+// the real transcript data begins and ends.
 func cleanTranscript(raw string) string {
 	lines := strings.Split(raw, "\n")
 
-	skipKeywords := []string{"Home", "About", "Transcripts", "Seasons", "KACL780.NET"}
+	// 1. Broaden the skip keywords and make them lowercase for case-insensitive matching
+	skipKeywords := []string{"home", "about", "transcripts", "seasons", "kacl780.net"}
 	var filtered []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
+
 		skip := false
+		lowerTrimmed := strings.ToLower(trimmed)
 		for _, kw := range skipKeywords {
-			if strings.Contains(trimmed, kw) {
+			if strings.Contains(lowerTrimmed, kw) {
 				skip = true
 				break
 			}
@@ -75,15 +78,47 @@ func cleanTranscript(raw string) string {
 	}
 
 	startIdx := 0
+	endIdx := len(filtered)
+
+	// 2. Find the START of the transcript (Case-insensitive & broader conditions)
 	for i, line := range filtered {
-		if strings.HasPrefix(line, "Transcript {") || strings.HasPrefix(line, "Act One") {
-			startIdx = i
+		lowerLine := strings.ToLower(line)
+
+		if strings.HasPrefix(lowerLine, "transcript {") ||
+			strings.HasPrefix(lowerLine, "[transcript") ||
+			strings.HasPrefix(lowerLine, "act one") ||
+			strings.HasPrefix(lowerLine, "act 1") ||
+			strings.HasPrefix(lowerLine, "[act one") {
+
+			// Optional: Skip the actual "Transcript {name}" marker line itself so it isn't saved
+			if strings.HasPrefix(lowerLine, "transcript {") {
+				startIdx = i + 1
+			} else {
+				startIdx = i
+			}
 			break
 		}
 	}
 
-	if startIdx < len(filtered) {
-		filtered = filtered[startIdx:]
+	// 3. Find the END of the transcript to strip the "Legal Stuff" and "Guest" footers
+	for i := startIdx; i < len(filtered); i++ {
+		lowerLine := strings.ToLower(filtered[i])
+		if strings.HasPrefix(lowerLine, "legal stuff") ||
+			strings.Contains(lowerLine, "episode capsule is copyright") ||
+			strings.Contains(lowerLine, "printed without permission") ||
+			strings.HasPrefix(lowerLine, "guest appearances") ||
+			strings.HasPrefix(lowerLine, "guest callers") ||
+			strings.HasPrefix(lowerLine, "guest starring") {
+			endIdx = i
+			break
+		}
+	}
+
+	// 4. Apply the bounds safely
+	if startIdx < endIdx {
+		filtered = filtered[startIdx:endIdx]
+	} else if startIdx < len(filtered) {
+		filtered = filtered[startIdx:] // Fallback just in case endIdx fails
 	}
 
 	return strings.Join(filtered, "\n")

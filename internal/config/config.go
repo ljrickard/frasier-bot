@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// RAGConfig holds toggleable feature flags for the RAG pipeline.
 type RAGConfig struct {
 	UseMetadata    bool
 	UseSwitchboard bool
@@ -15,31 +14,53 @@ type RAGConfig struct {
 	UseExpansion   bool
 	UseReranker    bool
 	UsePersona     bool
-	NoRAGMode      bool
+	UseRAG         bool
+	UseEval        bool
 	Debug          bool
 }
 
-// ParseFlags parses command-line flags and returns a RAGConfig.
 func ParseFlags() *RAGConfig {
 	cfg := &RAGConfig{}
 
-	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords...")
-	// ... (rest of your flags)
-	flag.BoolVar(&cfg.NoRAGMode, "compare", false, "Enable compare mode: Vanilla AI + Evaluation")
-	flag.BoolVar(&cfg.Debug, "debug", false, "Enable verbose debug logging")
+	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords to match broader intent")
+	flag.BoolVar(&cfg.UseSwitchboard, "switchboard", true, "Dynamically adjust Top-K context size")
+	flag.BoolVar(&cfg.UseDiversity, "diversity", true, "Force search results to span different episodes")
+	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Inject [SxxExx] tags for chronological awareness")
+	flag.BoolVar(&cfg.UseReranker, "reranker", true, "Use LLM to re-sort search results for accuracy")
+	flag.BoolVar(&cfg.UsePersona, "persona", true, "Apply the Frasier/Crane brother persona to the final output")
+	flag.BoolVar(&cfg.UseRAG, "rag", true, "Enable the RAG pipeline (set to false for Vanilla AI)")
+	flag.BoolVar(&cfg.UseEval, "eval", true, "Enable the Eval pipeline (Get back a answer_relevancy and faithfulness score)")
+	flag.BoolVar(&cfg.Debug, "debug", false, "Enable verbose debug logging in the terminal")
 
 	flag.Parse()
 
-	// THE FIX: Strict validation for Compare Mode
-	if cfg.NoRAGMode {
-		if cfg.UseExpansion || cfg.UseSwitchboard || cfg.UseDiversity || cfg.UseMetadata || cfg.UseReranker || cfg.UsePersona {
-			log.Fatal("🚨 ERROR: Compare Mode (-compare) must be run completely vanilla. You must disable all other features (e.g., -reranker=false -persona=false).")
+	// THE FIX: Only log.Fatal if the user EXPLICITLY enabled a RAG feature while using -rag=false
+	if !cfg.UseRAG {
+		conflicts := make([]string, 0)
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "expansion", "switchboard", "diversity", "metadata", "reranker":
+				if val, ok := f.Value.(flag.Getter).Get().(bool); ok && val {
+					conflicts = append(conflicts, "-"+f.Name)
+				}
+			}
+		})
+
+		if len(conflicts) > 0 {
+			log.Fatalf("🚨 ERROR: Vanilla Mode (-rag=false) cannot be used with explicitly enabled RAG features: %s. Disable these flags or use default RAG.", strings.Join(conflicts, ", "))
 		}
+
+		// If no explicit conflict, silently disable defaults for the Vanilla run
+		cfg.UseExpansion = false
+		cfg.UseSwitchboard = false
+		cfg.UseDiversity = false
+		cfg.UseMetadata = false
+		cfg.UseReranker = false
 	}
+
 	return cfg
 }
 
-// PrintStatus prints a formatted table of feature flags.
 func (c *RAGConfig) PrintStatus() {
 	features := []struct {
 		Name    string
@@ -51,7 +72,8 @@ func (c *RAGConfig) PrintStatus() {
 		{"Metadata Prefixing", c.UseMetadata},
 		{"Semantic Reranker", c.UseReranker},
 		{"Frasier Persona", c.UsePersona},
-		{"No RAG Mode", c.NoRAGMode},
+		{"RAG Pipeline", c.UseRAG},
+		{"Eval Answer", c.UseEval},
 		{"Debug Logging", c.Debug},
 	}
 

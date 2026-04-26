@@ -9,12 +9,11 @@ import (
 	"frasier-bot/internal/embeddings"
 	"frasier-bot/internal/models"
 	"log"
+	"strings"
 )
 
 const maxHistory = 10
 
-// RAGResult holds all the data and metadata from a single pipeline execution.
-// This makes it incredibly easy to assert against in your Go table tests.
 type RAGResult struct {
 	Answer          string
 	Scores          map[string]interface{}
@@ -28,8 +27,6 @@ type RAGResult struct {
 	PreRerankCount  int
 }
 
-// RunRAGPipeline executes the core RAG logic. It is completely decoupled from the CLI UI.
-// You can call this directly from your test files by passing a JSON struct and setting statusCallback to nil.
 func RunRAGPipeline(
 	ctx context.Context,
 	db *database.DB,
@@ -43,116 +40,68 @@ func RunRAGPipeline(
 	var res RAGResult
 	var searchResultsForAI []models.SearchResult
 
-	// Helper to safely call the status callback if it exists
 	updateStatus := func(msg string) {
 		if statusCallback != nil {
 			statusCallback(msg)
 		}
 	}
 
-	if !cfg.NoRAGMode {
-
-		// Step 1: Reformulate query using chat history
+	// Step 1: Handle Retrieval if RAG is enabled
+	if cfg.UseRAG {
 		updateStatus("Analyzing query...")
 		res.Reformulated = query
 		if cfg.UseExpansion {
 			ref, err := ai.ReformulateQuery(ctx, query, chatHistory)
-			if err != nil {
-				logger.Printf("WARN: failed to reformulate query: %v", err)
-			} else {
+			if err == nil {
 				res.Reformulated = ref
 			}
 		}
 
-		// Step 2: Classify the reformulated query for Top-K
+		// Step 2: Switchboard Logic
 		res.FetchK = 50
 		res.PerEpisodeLimit = 3
-		res.FinalK = 20
+		res.FinalK = 12 // Reduced from 20 to prevent 503 timeouts
 
 		if cfg.UseSwitchboard {
 			updateStatus("Classifying query...")
 			classification, err := ai.ClassifyQuery(ctx, res.Reformulated)
 			if err != nil {
-				logger.Printf("WARN: failed to classify query, defaulting to GENERAL: %v", err)
 				classification = "GENERAL"
 			}
 			res.Classification = classification
 			if classification == "SPECIFIC" {
 				res.FetchK = 30
-				res.FinalK = 10
+				res.FinalK = 8
 			}
 		} else {
 			res.Classification = "OFF"
-			res.FetchK = 5
+			res.FetchK = 10
 			res.FinalK = 5
 		}
 
-		// Step 3: Generate embedding for the reformulated query
+		// Step 3: Embeddings
 		updateStatus("Searching transcripts...")
 		queryEmbedding, err := embeddings.GenerateQueryEmbedding(ctx, res.Reformulated)
 		if err != nil {
-			logger.Printf("WARN: failed to generate query embedding: %v", err)
-			return res, fmt.Errorf("embedding error")
+			return res, fmt.Errorf("embedding error: %w", err)
 		}
 
-		// Step 4: Search chunks (children) — fetch wide
-		var results []models.SearchResult
+		// Step 4: DB Search
 		if cfg.UseDiversity {
-			results, err = db.SearchChunksDiverse(ctx, queryEmbedding, res.FetchK, res.PerEpisodeLimit)
+			searchResultsForAI, err = db.SearchChunksDiverse(ctx, queryEmbedding, res.FetchK, res.PerEpisodeLimit)
 		} else {
-			results, err = db.SearchChunks(ctx, queryEmbedding, res.FetchK)
+			searchResultsForAI, err = db.SearchChunks(ctx, queryEmbedding, res.FetchK)
 		}
-		if err != nil {
-			logger.Printf("WARN: failed to search chunks: %v", err)
-			return res, fmt.Errorf("search error")
-		}
-		if len(results) == 0 {
+		if err != nil || len(searchResultsForAI) == 0 {
 			return res, fmt.Errorf("no relevant transcripts found")
 		}
 
-		// Step 5: Collect unique parent IDs and fetch parent chunks
-		parentIDSet := make(map[int64]bool)
-		var parentIDs []int64
-		for _, r := range results {
-			if r.ParentID != nil && !parentIDSet[*r.ParentID] {
-				parentIDSet[*r.ParentID] = true
-				parentIDs = append(parentIDs, *r.ParentID)
-			}
-		}
-
-		var parentResults []models.SearchResult
-		if len(parentIDs) > 0 {
-			parents, err := db.GetParentChunksByIDs(ctx, parentIDs)
-			if err != nil {
-				logger.Printf("WARN: failed to fetch parent chunks: %v", err)
-			} else {
-				for _, p := range parents {
-					content := p.Content
-					if cfg.UseMetadata {
-						content = fmt.Sprintf("[S%02dE%02d] %s", p.Season, p.Episode, content)
-					}
-					parentResults = append(parentResults, models.SearchResult{
-						Title:   fmt.Sprintf("S%02dE%02d: %s", p.Season, p.Episode, p.EpisodeTitle),
-						URL:     p.URL,
-						Content: content,
-					})
-				}
-			}
-		}
-
-		searchResultsForAI := parentResults
-		if len(searchResultsForAI) == 0 {
-			searchResultsForAI = results
-		}
-
-		// Step 5b: Rerank chunks using LLM scoring
+		// Step 5: Reranking
 		res.PreRerankCount = len(searchResultsForAI)
 		if cfg.UseReranker {
 			updateStatus("Reranking results...")
 			reranked, err := ai.RerankChunks(ctx, res.Reformulated, searchResultsForAI, res.FinalK)
-			if err != nil {
-				logger.Printf("WARN: reranker failed, using original order: %v", err)
-			} else {
+			if err == nil {
 				searchResultsForAI = reranked
 			}
 		} else if len(searchResultsForAI) > res.FinalK {
@@ -165,25 +114,50 @@ func RunRAGPipeline(
 		res.Classification = "VANILLA"
 	}
 
-	// Step 6: Generate RAG answer
+	// special block
+	if cfg.UseReranker {
+		updateStatus("Special return...")
+		return res, nil
+	}
+
+	// Step 6: Final Augmentation & Generation
+	// Use a strings.Builder to build the prompt context properly
+	var contextBuilder strings.Builder
+	var contextStrings []string
+
+	for i, c := range searchResultsForAI {
+		contextBuilder.WriteString(fmt.Sprintf("Chunk %d:\n", i+1))
+		if cfg.UseMetadata {
+			contextBuilder.WriteString(fmt.Sprintf("Episode: %s [S%02dE%02d]\n", c.Title, c.Season, c.Episode))
+		}
+		contextBuilder.WriteString(fmt.Sprintf("Content: %s\n\n", c.Content))
+		contextStrings = append(contextStrings, c.Content)
+	}
+
 	updateStatus("Consulting the Crane brothers...")
+	// We pass the searchResultsForAI to the AI
 	ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI, cfg.UsePersona)
 	if err != nil {
-		logger.Printf("WARN: failed to generate RAG answer: %v", err)
-		return res, fmt.Errorf("generation error")
+		return res, fmt.Errorf("generation error: %w", err)
 	}
 	res.Answer = ragAnswer
 
-	// Step 7: LIVE RAG EVALUATION
-	var contextStrings []string
-	for _, r := range searchResultsForAI {
-		contextStrings = append(contextStrings, r.Content)
+	if cfg.UseEval {
+		// Step 7: LIVE RAG EVALUATION
+		updateStatus("Evaluating answer quality...")
+
+		// THE REAL FIX: Only inject dummy context if the user EXPLICITLY requested a baseline run.
+		if !cfg.UseRAG {
+			contextStrings = []string{"[NO DATABASE CONTEXT PROVIDED FOR THIS BASELINE RUN]"}
+		} else if len(contextStrings) == 0 {
+			// If RAG is ON but we have no contexts, that is a real error we should not mask!
+			logger.Printf("WARN: RAG is enabled but no context chunks were generated.")
+			return res, fmt.Errorf("evaluation failed: no context available for active RAG run")
+		}
+
+		scores, evalErr := EvaluateInteraction(query, contextStrings, ragAnswer)
+		res.Scores = scores
+		res.EvalErr = evalErr
 	}
-	updateStatus("Evaluating answer quality...")
-	scores, evalErr := EvaluateInteraction(query, contextStrings, ragAnswer)
-
-	res.Scores = scores
-	res.EvalErr = evalErr
-
 	return res, nil
 }

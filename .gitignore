@@ -27,3 +27,6 @@ scripts/loadtest.js
 # Build logs
 *.log
 *.tgz
+
+# Training data
+*.jsonl*
