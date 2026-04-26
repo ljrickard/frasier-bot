@@ -99,10 +99,15 @@ func RunRAGPipeline(
 		// Step 5: Reranking
 		res.PreRerankCount = len(searchResultsForAI)
 		if cfg.UseReranker {
-			updateStatus("Reranking results...")
-			reranked, err := ai.RerankChunks(ctx, res.Reformulated, searchResultsForAI, res.FinalK)
+			updateStatus(fmt.Sprintf("Reranking results via %s...", cfg.RerankerBackend))
+			reranked, err := ai.RerankChunks(ctx, cfg.RerankerBackend, res.Reformulated, searchResultsForAI, res.FinalK)
 			if err == nil {
 				searchResultsForAI = reranked
+			} else {
+				logger.Printf("WARN: Reranking failed, falling back to original search order: %v", err)
+				if len(searchResultsForAI) > res.FinalK {
+					searchResultsForAI = searchResultsForAI[:res.FinalK]
+				}
 			}
 		} else if len(searchResultsForAI) > res.FinalK {
 			searchResultsForAI = searchResultsForAI[:res.FinalK]

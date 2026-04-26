@@ -13,6 +13,7 @@ type RAGConfig struct {
 	UseEpisodeLimit        bool
 	UseExpansion           bool
 	UseReranker            bool
+	RerankerBackend        string // NEW: "gemini" or "local"
 	UsePersona             bool
 	UseRAG                 bool
 	UseEval                bool
@@ -27,6 +28,7 @@ func ParseFlags() *RAGConfig {
 	flag.BoolVar(&cfg.UseEpisodeLimit, "diversity", true, "Force search results to span different episodes")
 	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Inject [SxxExx] tags for chronological awareness")
 	flag.BoolVar(&cfg.UseReranker, "reranker", true, "Use LLM to re-sort search results for accuracy")
+	flag.StringVar(&cfg.RerankerBackend, "reranker-backend", "gemini", "Which reranker to use: 'gemini' or 'local'")
 	flag.BoolVar(&cfg.UsePersona, "persona", true, "Apply the Frasier/Crane brother persona to the final output")
 	flag.BoolVar(&cfg.UseRAG, "rag", true, "Enable the RAG pipeline (set to false for Vanilla AI)")
 	flag.BoolVar(&cfg.UseEval, "eval", true, "Enable the Eval pipeline (Get back a answer_relevancy and faithfulness score)")
@@ -87,6 +89,9 @@ func (c *RAGConfig) PrintStatus() {
 		}
 		name := f.Name + strings.Repeat(" ", 23-len(f.Name))
 		fmt.Printf("  │ %s │ %s │\n", name, status)
+	}
+	if c.UseReranker {
+		fmt.Printf("  │ %s │ \033[34m%-8s\033[0m │\n", "Reranker Backend       ", c.RerankerBackend)
 	}
 	fmt.Println("  └─────────────────────────┴──────────┘")
 }
