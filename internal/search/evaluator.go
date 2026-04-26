@@ -18,12 +18,12 @@ type EvalPayload struct {
 
 // EvalResponse matches the incoming {"status": "success", "scores": ...}
 type EvalResponse struct {
-	Status string                 `json:"status"`
-	Scores map[string]interface{} `json:"scores"` // Flexible map to catch any scoring metrics returned
+	Status string         `json:"status"`
+	Scores map[string]any `json:"scores"` // Flexible map to catch any scoring metrics returned
 }
 
 // EvaluateInteraction sends the RAG data to the local evaluation server and returns the scores.
-func EvaluateInteraction(question string, contexts []string, answer string) (map[string]interface{}, error) {
+func EvaluateInteraction(question string, contexts []string, answer string) (map[string]any, error) {
 	payload := EvalPayload{
 		Question:    question,
 		Contexts:    contexts,

@@ -48,7 +48,7 @@ func GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	model := "text-embedding-004"
 	resourceName := fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", project, location, model)
 
-	instance, err := structpb.NewValue(map[string]interface{}{
+	instance, err := structpb.NewValue(map[string]any{
 		"content":   text,
 		"task_type": "RETRIEVAL_DOCUMENT",
 	})
@@ -118,7 +118,7 @@ func GenerateQueryEmbedding(ctx context.Context, text string) ([]float32, error)
 	model := "text-embedding-004"
 	resourceName := fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", project, location, model)
 
-	instance, err := structpb.NewValue(map[string]interface{}{
+	instance, err := structpb.NewValue(map[string]any{
 		"content":   text,
 		"task_type": "RETRIEVAL_QUERY",
 	})

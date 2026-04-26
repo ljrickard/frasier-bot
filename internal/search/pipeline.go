@@ -16,7 +16,7 @@ const maxHistory = 10
 
 type RAGResult struct {
 	Answer         string
-	Scores         map[string]interface{}
+	Scores         map[string]any
 	EvalErr        error
 	Contexts       []models.SearchResult
 	Reformulated   string

@@ -69,7 +69,7 @@ func (c *RAGConfig) PrintStatus() {
 		{"Query Expansion", c.UseExpansion},
 		{"Query Classification", c.UseQueryClassification},
 		{"Episode Limit", c.UseEpisodeLimit},
-		{"Metadata Prefixing", c.UseMetadata},
+		{"Metadata Enrichment", c.UseMetadata},
 		{"Semantic Reranker", c.UseReranker},
 		{"Frasier Persona", c.UsePersona},
 		{"RAG Pipeline", c.UseRAG},

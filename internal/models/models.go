@@ -26,17 +26,17 @@ type ParentChunk struct {
 
 // Chunk represents a small, embeddable segment of dialogue.
 type Chunk struct {
-	ID           int64                  `json:"id"`
-	ShowID       int64                  `json:"show_id"`
-	ParentID     *int64                 `json:"parent_id,omitempty"`
-	Content      string                 `json:"content"`
-	Embedding    []float32              `json:"embedding,omitempty"`
-	Season       int                    `json:"season"`
-	Episode      int                    `json:"episode"`
-	EpisodeTitle string                 `json:"episode_title,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"` // For storing JSONB data like characters speaking
-	CreatedAt    time.Time              `json:"created_at_utc"`
-	UpdatedAt    time.Time              `json:"updated_at_utc"`
+	ID           int64          `json:"id"`
+	ShowID       int64          `json:"show_id"`
+	ParentID     *int64         `json:"parent_id,omitempty"`
+	Content      string         `json:"content"`
+	Embedding    []float32      `json:"embedding,omitempty"`
+	Season       int            `json:"season"`
+	Episode      int            `json:"episode"`
+	EpisodeTitle string         `json:"episode_title,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"` // For storing JSONB data like characters speaking
+	CreatedAt    time.Time      `json:"created_at_utc"`
+	UpdatedAt    time.Time      `json:"updated_at_utc"`
 }
 
 // SearchResult holds a single semantic search result returned by pgvector.
