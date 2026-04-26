@@ -64,7 +64,7 @@ func StartChatLoop(ctx context.Context, db *database.DB, cfg *config.RAGConfig, 
 			if res.Reformulated != query {
 				fmt.Printf("  \033[36mDEBUG: Reformulated -> %q\033[0m\n", res.Reformulated)
 			}
-			fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Fetch=%d, Final=%d, PerEpisode=%d]\033[0m\n", res.Classification, res.FetchK, res.FinalK, res.PerEpisodeLimit)
+			fmt.Printf("  \033[36mDEBUG: Switchboard -> [%s, Fetch=%d, Final=%d, PerEpisode=%d]\033[0m\n", res.Classification, res.FetchK, res.FinalK, res.EpisodeLimit)
 
 			if cfg.UseReranker {
 				fmt.Printf("  \033[36mDEBUG: Reranker kept %d out of %d chunks\033[0m\n", len(res.Contexts), res.PreRerankCount)

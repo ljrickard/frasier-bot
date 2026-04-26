@@ -15,16 +15,16 @@ import (
 const maxHistory = 10
 
 type RAGResult struct {
-	Answer          string
-	Scores          map[string]interface{}
-	EvalErr         error
-	Contexts        []models.SearchResult
-	Reformulated    string
-	Classification  string
-	FetchK          int
-	FinalK          int
-	PerEpisodeLimit int
-	PreRerankCount  int
+	Answer         string
+	Scores         map[string]interface{}
+	EvalErr        error
+	Contexts       []models.SearchResult
+	Reformulated   string
+	Classification string
+	FetchK         int
+	FinalK         int
+	EpisodeLimit   int
+	PreRerankCount int
 }
 
 func RunRAGPipeline(
@@ -51,7 +51,7 @@ func RunRAGPipeline(
 		updateStatus("Analyzing query...")
 		res.Reformulated = query
 		if cfg.UseExpansion {
-			ref, err := ai.ReformulateQuery(ctx, query, chatHistory)
+			ref, err := ai.ExpandQuery(ctx, query, chatHistory)
 			if err == nil {
 				res.Reformulated = ref
 			}
@@ -59,10 +59,10 @@ func RunRAGPipeline(
 
 		// Step 2: Switchboard Logic
 		res.FetchK = 50
-		res.PerEpisodeLimit = 3
+		res.EpisodeLimit = 3
 		res.FinalK = 12 // Reduced from 20 to prevent 503 timeouts
 
-		if cfg.UseSwitchboard {
+		if cfg.UseQueryClassification {
 			updateStatus("Classifying query...")
 			classification, err := ai.ClassifyQuery(ctx, res.Reformulated)
 			if err != nil {
@@ -87,8 +87,8 @@ func RunRAGPipeline(
 		}
 
 		// Step 4: DB Search
-		if cfg.UseDiversity {
-			searchResultsForAI, err = db.SearchChunksDiverse(ctx, queryEmbedding, res.FetchK, res.PerEpisodeLimit)
+		if cfg.UseEpisodeLimit {
+			searchResultsForAI, err = db.SearchChunksWithEpisodeLimit(ctx, queryEmbedding, res.FetchK, res.EpisodeLimit)
 		} else {
 			searchResultsForAI, err = db.SearchChunks(ctx, queryEmbedding, res.FetchK)
 		}
@@ -112,12 +112,6 @@ func RunRAGPipeline(
 	} else {
 		updateStatus("Bypassing RAG (Vanilla AI mode)...")
 		res.Classification = "VANILLA"
-	}
-
-	// special block
-	if cfg.UseReranker {
-		updateStatus("Special return...")
-		return res, nil
 	}
 
 	// Step 6: Final Augmentation & Generation

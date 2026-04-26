@@ -336,8 +336,8 @@ func Test_Reranker_Data_Gen(t *testing.T) {
 			Name: "4_Production_Candidate_(Added_Reranker)",
 			// Turns on all the heavy ML lifting to find the perfect facts.
 			Cfg: &config.RAGConfig{
-				UseRAG: true, UseExpansion: true, UseSwitchboard: true,
-				UseReranker: true, UseDiversity: true, UseMetadata: true, UsePersona: false,
+				UseRAG: true, UseExpansion: true, UseQueryClassification: true,
+				UseReranker: true, UseEpisodeLimit: true, UseMetadata: true, UsePersona: false,
 			},
 		},
 	}

@@ -120,7 +120,7 @@ func (db *DB) DeleteChunk(ctx context.Context, id int64) error {
 // SearchChunksDiverse retrieves the top-K semantically similar dialogue chunks but
 // limits results to at most perEpisodeLimit chunks per (season, episode) pair,
 // ensuring the context window spans a diverse range of episodes.
-func (db *DB) SearchChunksDiverse(ctx context.Context, queryEmbedding []float32, limit int, perEpisodeLimit int) ([]models.SearchResult, error) {
+func (db *DB) SearchChunksWithEpisodeLimit(ctx context.Context, queryEmbedding []float32, limit int, perEpisodeLimit int) ([]models.SearchResult, error) {
 	vec := pgvector.NewVector(queryEmbedding)
 
 	// Fetch a larger candidate pool so we have enough to fill `limit` slots

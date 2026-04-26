@@ -47,32 +47,32 @@ func TestFrasierRAG(t *testing.T) {
 			Name: "2_Standard_RAG_(Basic_Search)",
 			// Turns on the DB, but leaves advanced reasoning off.
 			Cfg: &config.RAGConfig{
-				UseRAG: true, UseExpansion: false, UseSwitchboard: false,
-				UseReranker: false, UseDiversity: false, UseMetadata: false, UsePersona: false,
+				UseRAG: true, UseExpansion: false, UseQueryClassification: false,
+				UseReranker: false, UseEpisodeLimit: false, UseMetadata: false, UsePersona: false,
 			},
 		},
 		{
 			Name: "3_Advanced_RAG_(Switchboard_+_Expansion)",
 			// Adds query expansion and dynamic context sizing.
 			Cfg: &config.RAGConfig{
-				UseRAG: true, UseExpansion: true, UseSwitchboard: true,
-				UseReranker: false, UseDiversity: false, UseMetadata: false, UsePersona: false,
+				UseRAG: true, UseExpansion: true, UseQueryClassification: true,
+				UseReranker: false, UseEpisodeLimit: false, UseMetadata: false, UsePersona: false,
 			},
 		},
 		{
 			Name: "4_Production_Candidate_(Added_Reranker)",
 			// Turns on all the heavy ML lifting to find the perfect facts.
 			Cfg: &config.RAGConfig{
-				UseRAG: true, UseExpansion: true, UseSwitchboard: true,
-				UseReranker: true, UseDiversity: true, UseMetadata: true, UsePersona: false,
+				UseRAG: true, UseExpansion: true, UseQueryClassification: true,
+				UseReranker: true, UseEpisodeLimit: true, UseMetadata: true, UsePersona: false,
 			},
 		},
 		{
 			Name: "5_Brand_Voice_(Production_+_Persona)",
 			// Production candidate, but adds the Persona to measure the Relevancy drop.
 			Cfg: &config.RAGConfig{
-				UseRAG: true, UseExpansion: true, UseSwitchboard: true,
-				UseReranker: true, UseDiversity: true, UseMetadata: true, UsePersona: true,
+				UseRAG: true, UseExpansion: true, UseQueryClassification: true,
+				UseReranker: true, UseEpisodeLimit: true, UseMetadata: true, UsePersona: true,
 			},
 		},
 	}

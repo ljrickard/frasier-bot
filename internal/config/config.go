@@ -8,23 +8,23 @@ import (
 )
 
 type RAGConfig struct {
-	UseMetadata    bool
-	UseSwitchboard bool
-	UseDiversity   bool
-	UseExpansion   bool
-	UseReranker    bool
-	UsePersona     bool
-	UseRAG         bool
-	UseEval        bool
-	Debug          bool
+	UseMetadata            bool
+	UseQueryClassification bool
+	UseEpisodeLimit        bool
+	UseExpansion           bool
+	UseReranker            bool
+	UsePersona             bool
+	UseRAG                 bool
+	UseEval                bool
+	Debug                  bool
 }
 
 func ParseFlags() *RAGConfig {
 	cfg := &RAGConfig{}
 
 	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords to match broader intent")
-	flag.BoolVar(&cfg.UseSwitchboard, "switchboard", true, "Dynamically adjust Top-K context size")
-	flag.BoolVar(&cfg.UseDiversity, "diversity", true, "Force search results to span different episodes")
+	flag.BoolVar(&cfg.UseQueryClassification, "switchboard", true, "Dynamically adjust Top-K context size")
+	flag.BoolVar(&cfg.UseEpisodeLimit, "diversity", true, "Force search results to span different episodes")
 	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Inject [SxxExx] tags for chronological awareness")
 	flag.BoolVar(&cfg.UseReranker, "reranker", true, "Use LLM to re-sort search results for accuracy")
 	flag.BoolVar(&cfg.UsePersona, "persona", true, "Apply the Frasier/Crane brother persona to the final output")
@@ -52,8 +52,8 @@ func ParseFlags() *RAGConfig {
 
 		// If no explicit conflict, silently disable defaults for the Vanilla run
 		cfg.UseExpansion = false
-		cfg.UseSwitchboard = false
-		cfg.UseDiversity = false
+		cfg.UseQueryClassification = false
+		cfg.UseEpisodeLimit = false
 		cfg.UseMetadata = false
 		cfg.UseReranker = false
 	}
@@ -67,13 +67,13 @@ func (c *RAGConfig) PrintStatus() {
 		Enabled bool
 	}{
 		{"Query Expansion", c.UseExpansion},
-		{"Switchboard", c.UseSwitchboard},
-		{"Diversity Filter", c.UseDiversity},
+		{"Query Classification", c.UseQueryClassification},
+		{"Episode Limit", c.UseEpisodeLimit},
 		{"Metadata Prefixing", c.UseMetadata},
 		{"Semantic Reranker", c.UseReranker},
 		{"Frasier Persona", c.UsePersona},
 		{"RAG Pipeline", c.UseRAG},
-		{"Eval Answer", c.UseEval},
+		{"Evaluate Answer", c.UseEval},
 		{"Debug Logging", c.Debug},
 	}
 
