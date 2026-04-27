@@ -1,0 +1,25 @@
+replicaCount: 1
+
+image:
+  # Update with your actual artifact registry path
+  repository: us-central1-docker.pkg.dev/pisces-12/pisces-repo/frasier-chat
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  name: frasier-chat-svc
+  type: ClusterIP
+
+ports:
+  servicePort: 80
+  targetPort: 8080
+
+env:
+  LOGGING_LEVEL: "DEBUG"
+  CROSS_ENCODER_URL: "http://cross-encoder-svc/frasier/rerank"
+  
+# Database Configuration
+db:
+  name: "frasier_db"
+  user: "frasier-bot"
+  host: "10.208.0.3" 

@@ -42,17 +42,14 @@ Query: %s`
 const promptReformulate = `You are a search query optimizer for a Frasier TV show transcript database. Your goal is to turn the user's question into the best possible vector search terms.
 
 Rules:
-1. If there is conversation history, rewrite the question to be standalone (resolve pronouns like "he", "she", "they" using context).
-2. Expand narrow words into broader search terms to cover the full 11-season history:
+1. Expand narrow words into broader search terms to cover the full 11-season history:
    - "lovers", "dating", "relationships" → expand to include "marriage, wives, ex-wives, husband, romantic interests, significant others, girlfriend, boyfriend, dating, affair"
    - "jobs", "career" → expand to include "work, profession, employment, fired, hired, promotion, radio show, private practice"
    - "fights", "arguments" → expand to include "conflict, disagreement, feud, rivalry, confrontation, tension"
    - "family" → expand to include "father, brother, son, wife, ex-wife, mother, children"
-3. Always include character names if the question implies specific characters.
-4. Respond with ONLY the rewritten/expanded query, nothing else.
+2. Always include character names if the question implies specific characters.
+3. Respond with ONLY the expanded query, nothing else.
 
-Conversation History:
-%s
 Latest Question: %s`
 
 const promptRerank = `You are a relevance grader for a Frasier TV show transcript search engine.

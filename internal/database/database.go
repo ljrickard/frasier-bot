@@ -3,48 +3,50 @@ package database
 import (
 	"context"
 	"fmt"
-	"os"
+	"log/slog"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// DB wraps the connection pool to provide custom methods later
 type DB struct {
 	Pool *pgxpool.Pool
 }
 
-func New(ctx context.Context) (*DB, error) {
-	connStr := os.Getenv("DATABASE_URL")
-	if connStr == "" {
-		return nil, fmt.Errorf("DATABASE_URL environment variable is not set")
-	}
+// Connect establishes a connection pool to the PostgreSQL database using the provided DSN
+func Connect(ctx context.Context, dsn string) (*DB, error) {
+	slog.Debug("Attempting database connection to Cloud SQL...")
 
-	config, err := pgxpool.ParseConfig(connStr)
+	// 1. Parse the DSN string into a config object
+	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse connection string: %w", err)
+		return nil, fmt.Errorf("unable to parse database config: %w", err)
 	}
 
-	config.MaxConns = 10
-
-	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, "SET timezone = 'UTC'")
-		return err
-	}
-
+	// 2. Create the connection pool
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+		return nil, fmt.Errorf("unable to create database pool: %w", err)
 	}
 
+	// 3. Ping the database to verify the connection is actually alive
 	if err := pool.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		// If ping fails, close the pool to prevent resource leaks
+		pool.Close()
+		return nil, fmt.Errorf("database ping failed: %w", err)
 	}
 
+	slog.Info("✅ Successfully connected to Cloud SQL (PostgreSQL)")
 	return &DB{Pool: pool}, nil
 }
 
+// Close cleanly shuts down the database connection pool
+// Call this using `defer db.Close()` in your main.go
 func (db *DB) Close() {
-	db.Pool.Close()
+	if db.Pool != nil {
+		slog.Info("🔌 Closing database connection pool")
+		db.Pool.Close()
+	}
 }
 
 func (db *DB) RunMigrations(ctx context.Context) error {
@@ -103,26 +105,6 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 
 	// 5. Create Indexes for performance
 	_, _ = db.Pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_chunks_show_id ON chunks(show_id)`)
-
-	return nil
-}
-
-// ClearDatabase updated to drop all data from the new tables
-func (db *DB) ClearDatabase(ctx context.Context) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM chunks`)
-	if err != nil {
-		return fmt.Errorf("failed to clear chunks: %w", err)
-	}
-
-	_, err = db.Pool.Exec(ctx, `DELETE FROM parent_chunks`)
-	if err != nil {
-		return fmt.Errorf("failed to clear parent_chunks: %w", err)
-	}
-
-	_, err = db.Pool.Exec(ctx, `DELETE FROM shows`)
-	if err != nil {
-		return fmt.Errorf("failed to clear shows: %w", err)
-	}
 
 	return nil
 }

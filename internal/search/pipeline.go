@@ -8,7 +8,7 @@ import (
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/embeddings"
 	"frasier-bot/internal/models"
-	"log"
+	"log/slog"
 	"strings"
 )
 
@@ -31,27 +31,18 @@ func RunRAGPipeline(
 	ctx context.Context,
 	db *database.DB,
 	cfg *config.RAGConfig,
-	logger *log.Logger,
 	query string,
-	chatHistory []string,
-	statusCallback func(string),
 ) (RAGResult, error) {
 
 	var res RAGResult
 	var searchResultsForAI []models.SearchResult
 
-	updateStatus := func(msg string) {
-		if statusCallback != nil {
-			statusCallback(msg)
-		}
-	}
-
 	// Step 1: Handle Retrieval if RAG is enabled
 	if cfg.UseRAG {
-		updateStatus("Analyzing query...")
+		slog.Debug("Analyzing query...")
 		res.Reformulated = query
 		if cfg.UseQueryExpansion {
-			ref, err := ai.ExpandQuery(ctx, query, chatHistory)
+			ref, err := ai.ExpandQuery(ctx, query)
 			if err == nil {
 				res.Reformulated = ref
 			}
@@ -63,7 +54,7 @@ func RunRAGPipeline(
 		res.FinalK = 12 // Reduced from 20 to prevent 503 timeouts
 
 		if cfg.UseQueryClassification {
-			updateStatus("Classifying query...")
+			slog.Debug("Classifying query...")
 			classification, err := ai.ClassifyQuery(ctx, res.Reformulated)
 			if err != nil {
 				classification = "GENERAL"
@@ -80,7 +71,7 @@ func RunRAGPipeline(
 		}
 
 		// Step 3: Embeddings
-		updateStatus("Searching transcripts...")
+		slog.Debug("Searching transcripts...")
 		queryEmbedding, err := embeddings.GenerateQueryEmbedding(ctx, res.Reformulated)
 		if err != nil {
 			return res, fmt.Errorf("embedding error: %w", err)
@@ -99,12 +90,12 @@ func RunRAGPipeline(
 		// Step 5: Reranking
 		res.PreRerankCount = len(searchResultsForAI)
 		if cfg.UseReranker {
-			updateStatus(fmt.Sprintf("Reranking results via %s...", cfg.RerankerBackend))
+			slog.Debug(fmt.Sprintf("Reranking results via %s...", cfg.RerankerBackend))
 			reranked, err := ai.RerankChunks(ctx, cfg.RerankerBackend, res.Reformulated, searchResultsForAI, res.FinalK)
 			if err == nil {
 				searchResultsForAI = reranked
 			} else {
-				logger.Printf("WARN: Reranking failed, falling back to original search order: %v", err)
+				slog.Warn("Reranking failed, falling back to original search order", "error", err)
 				if len(searchResultsForAI) > res.FinalK {
 					searchResultsForAI = searchResultsForAI[:res.FinalK]
 				}
@@ -115,7 +106,7 @@ func RunRAGPipeline(
 		res.Contexts = searchResultsForAI
 
 	} else {
-		updateStatus("Bypassing RAG (Vanilla AI mode)...")
+		slog.Debug("Bypassing RAG (Vanilla AI mode)...")
 		res.Classification = "VANILLA"
 	}
 
@@ -133,7 +124,7 @@ func RunRAGPipeline(
 		contextStrings = append(contextStrings, c.Content)
 	}
 
-	updateStatus("Consulting the Crane brothers...")
+	slog.Debug("Consulting the Crane brothers...")
 	// We pass the searchResultsForAI to the AI
 	ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI, cfg.UsePersona)
 	if err != nil {
@@ -141,22 +132,5 @@ func RunRAGPipeline(
 	}
 	res.Answer = ragAnswer
 
-	if cfg.UseEval {
-		// Step 7: LIVE RAG EVALUATION
-		updateStatus("Evaluating answer quality...")
-
-		// THE REAL FIX: Only inject dummy context if the user EXPLICITLY requested a baseline run.
-		if !cfg.UseRAG {
-			contextStrings = []string{"[NO DATABASE CONTEXT PROVIDED FOR THIS BASELINE RUN]"}
-		} else if len(contextStrings) == 0 {
-			// If RAG is ON but we have no contexts, that is a real error we should not mask!
-			logger.Printf("WARN: RAG is enabled but no context chunks were generated.")
-			return res, fmt.Errorf("evaluation failed: no context available for active RAG run")
-		}
-
-		scores, evalErr := EvaluateInteraction(query, contextStrings, ragAnswer)
-		res.Scores = scores
-		res.EvalErr = evalErr
-	}
 	return res, nil
 }

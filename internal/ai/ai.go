@@ -97,23 +97,13 @@ func ClassifyQuery(ctx context.Context, query string) (string, error) {
 	return "GENERAL", nil
 }
 
-func ExpandQuery(ctx context.Context, query string, history []string) (string, error) {
-	historyText := "(No prior conversation)"
-	if len(history) > 0 {
-		var hb strings.Builder
-		for _, h := range history {
-			hb.WriteString(h)
-			hb.WriteString("\n")
-		}
-		historyText = hb.String()
-	}
-
+func ExpandQuery(ctx context.Context, query string) (string, error) {
 	client, err := gemini.GetClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to create genai client: %w", err)
 	}
 
-	prompt := fmt.Sprintf(promptReformulate, historyText, query)
+	prompt := fmt.Sprintf(promptReformulate, query)
 	temperature := float32(0.0)
 
 	resp, err := gemini.CallWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {

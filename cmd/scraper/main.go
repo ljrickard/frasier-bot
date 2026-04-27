@@ -27,16 +27,17 @@ func main() {
 
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
 
-	// Check for --reset flag
-	resetDB := false
-	for _, arg := range os.Args[1:] {
-		if arg == "--reset" {
-			resetDB = true
-		}
-	}
+	dbHost := os.Getenv("DB_HOST")
+	dbUser := os.Getenv("DB_USER")
+	dbPass := os.Getenv("DB_PASS")
+	dbName := os.Getenv("DB_NAME")
+
+	// Typical Postgres DSN format
+	dsn := fmt.Sprintf("host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
+		dbHost, dbUser, dbPass, dbName)
 
 	logger.Println("Connecting to database...")
-	db, err := database.New(ctx)
+	db, err := database.Connect(ctx, dsn)
 	if err != nil {
 		logger.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -47,14 +48,6 @@ func main() {
 		logger.Fatalf("Failed to run migrations: %v", err)
 	}
 	logger.Println("Migrations completed successfully.")
-
-	if resetDB {
-		logger.Println("--reset flag detected. Clearing all data...")
-		if err := db.ClearDatabase(ctx); err != nil {
-			logger.Fatalf("Failed to clear database: %v", err)
-		}
-		logger.Println("Database cleared successfully.")
-	}
 
 	if err := embeddings.Preflight(); err != nil {
 		logger.Fatalf("Embedding service preflight check failed: %v", err)
