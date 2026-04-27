@@ -27,13 +27,7 @@ type RAGResult struct {
 	PreRerankCount int
 }
 
-func RunRAGPipeline(
-	ctx context.Context,
-	db *database.DB,
-	cfg *config.RAGConfig,
-	query string,
-) (RAGResult, error) {
-
+func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig, aiSvc *ai.Service, query string) (RAGResult, error) {
 	var res RAGResult
 	var searchResultsForAI []models.SearchResult
 
@@ -42,7 +36,7 @@ func RunRAGPipeline(
 		slog.Debug("Analyzing query...")
 		res.Reformulated = query
 		if cfg.UseQueryExpansion {
-			ref, err := ai.ExpandQuery(ctx, query)
+			ref, err := aiSvc.ExpandQuery(ctx, query)
 			if err == nil {
 				res.Reformulated = ref
 			}
@@ -55,7 +49,7 @@ func RunRAGPipeline(
 
 		if cfg.UseQueryClassification {
 			slog.Debug("Classifying query...")
-			classification, err := ai.ClassifyQuery(ctx, res.Reformulated)
+			classification, err := aiSvc.ClassifyQuery(ctx, res.Reformulated)
 			if err != nil {
 				classification = "GENERAL"
 			}
@@ -91,7 +85,7 @@ func RunRAGPipeline(
 		res.PreRerankCount = len(searchResultsForAI)
 		if cfg.UseReranker {
 			slog.Debug(fmt.Sprintf("Reranking results via %s...", cfg.RerankerBackend))
-			reranked, err := ai.RerankChunks(ctx, cfg.RerankerBackend, res.Reformulated, searchResultsForAI, res.FinalK)
+			reranked, err := aiSvc.RerankChunks(ctx, cfg.RerankerBackend, res.Reformulated, searchResultsForAI, res.FinalK)
 			if err == nil {
 				searchResultsForAI = reranked
 			} else {
@@ -126,7 +120,7 @@ func RunRAGPipeline(
 
 	slog.Debug("Consulting the Crane brothers...")
 	// We pass the searchResultsForAI to the AI
-	ragAnswer, err := ai.GenerateAnswer(ctx, query, searchResultsForAI, cfg.UsePersona)
+	ragAnswer, err := aiSvc.GenerateAnswer(ctx, query, searchResultsForAI, cfg.UsePersona)
 	if err != nil {
 		return res, fmt.Errorf("generation error: %w", err)
 	}

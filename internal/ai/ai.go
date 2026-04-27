@@ -3,39 +3,36 @@ package ai
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
 	"strings"
 
-	"frasier-bot/internal/ai/gemini"
+	"frasier-bot/internal/crossencoder"
+	"frasier-bot/internal/gemini"
 	"frasier-bot/internal/models"
-
-	"google.golang.org/genai"
 )
 
-func init() {
-	// Redirect default logger (used by SDKs) to stderr to keep stdout clean
-	log.SetOutput(os.Stderr)
+// Service encapsulates external clients
+type Service struct {
+	LLM     *gemini.Client
+	Encoder *crossencoder.Client // Added Cross-Encoder
 }
 
-// GenerateAnswer dynamically switches between strict RAG and Vanilla depending on context length
-func GenerateAnswer(ctx context.Context, query string, chunks []models.SearchResult, usePersona bool) (string, error) {
-	client, err := gemini.GetClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
+func NewService(llm *gemini.Client, encoder *crossencoder.Client) *Service {
+	return &Service{
+		LLM:     llm,
+		Encoder: encoder,
 	}
+}
 
+func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []models.SearchResult, usePersona bool) (string, error) {
 	var prompt string
 
 	if len(chunks) == 0 {
-		// VANILLA BASELINE: If we have no context chunks, be a helpful expert using internal knowledge.
 		if usePersona {
 			prompt = fmt.Sprintf(promptPersonaVanilla, query)
 		} else {
 			prompt = fmt.Sprintf(promptStandardVanilla, query)
 		}
 	} else {
-		// RAG MODE: If we have chunks, build the context and enforce strict adherence.
 		var contextBuilder strings.Builder
 		for i, c := range chunks {
 			contextBuilder.WriteString(fmt.Sprintf("Chunk %d:\n", i+1))
@@ -52,70 +49,39 @@ func GenerateAnswer(ctx context.Context, query string, chunks []models.SearchRes
 		}
 	}
 
-	temperature := float32(0.2)
-	resp, err := gemini.CallWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
-		return client.Models.GenerateContent(ctx, gemini.GeminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-			Temperature: &temperature,
-		})
-	})
+	// The wrapper handles retries, extraction, and temperature internally now!
+	answer, err := s.LLM.GenerateText(ctx, prompt)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate content: %w", err)
-	}
-
-	answer := extractText(resp)
-	if answer == "" {
-		return "", fmt.Errorf("empty response from model")
+		return "", fmt.Errorf("failed to generate answer: %w", err)
 	}
 
 	return answer, nil
 }
 
-func ClassifyQuery(ctx context.Context, query string) (string, error) {
-	client, err := gemini.GetClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
-	}
-
+func (s *Service) ClassifyQuery(ctx context.Context, query string) (string, error) {
 	prompt := fmt.Sprintf(promptClassify, query)
-	temperature := float32(0.0)
 
-	resp, err := gemini.CallWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
-		return client.Models.GenerateContent(ctx, gemini.GeminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-			Temperature: &temperature,
-		})
-	})
+	response, err := s.LLM.GenerateText(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("failed to classify query: %w", err)
 	}
 
-	result := strings.TrimSpace(extractText(resp))
-	result = strings.ToUpper(result)
-
+	result := strings.ToUpper(strings.TrimSpace(response))
 	if strings.Contains(result, "SPECIFIC") {
 		return "SPECIFIC", nil
 	}
 	return "GENERAL", nil
 }
 
-func ExpandQuery(ctx context.Context, query string) (string, error) {
-	client, err := gemini.GetClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create genai client: %w", err)
-	}
-
+func (s *Service) ExpandQuery(ctx context.Context, query string) (string, error) {
 	prompt := fmt.Sprintf(promptReformulate, query)
-	temperature := float32(0.0)
 
-	resp, err := gemini.CallWithRetry(ctx, func() (*genai.GenerateContentResponse, error) {
-		return client.Models.GenerateContent(ctx, gemini.GeminiModel, genai.Text(prompt), &genai.GenerateContentConfig{
-			Temperature: &temperature,
-		})
-	})
+	response, err := s.LLM.GenerateText(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("failed to reformulate query: %w", err)
 	}
 
-	result := strings.TrimSpace(extractText(resp))
+	result := strings.TrimSpace(response)
 	if result == "" {
 		return query, nil
 	}

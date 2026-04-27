@@ -23,3 +23,8 @@ db:
   name: "frasier_db"
   user: "frasier-bot"
   host: "10.208.0.3" 
+
+gemini:
+  project: "pisces-12"
+  location: "us-central1"
+  model: "gemini-2.5-flash"

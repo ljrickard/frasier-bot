@@ -17,6 +17,7 @@ spec:
         # Forces a pod restart every time you run `helm upgrade`
         rollme: {{ randAlphaNum 5 | quote }}
     spec:
+      serviceAccountName: frasier-chat-ksa
       containers:
         - name: chat-api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -43,6 +44,12 @@ spec:
                 secretKeyRef:
                   name: frasier-db-password
                   key: password
+            - name: GEMINI_PROJECT
+              value: {{ .Values.gemini.project | quote }}
+            - name: GEMINI_LOCATION
+              value: {{ .Values.gemini.location | quote }}
+            - name: GEMINI_MODEL
+              value: {{ .Values.gemini.model | quote }}            
 
           readinessProbe:
             httpGet:
