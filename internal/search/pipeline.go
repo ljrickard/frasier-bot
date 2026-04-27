@@ -50,7 +50,7 @@ func RunRAGPipeline(
 	if cfg.UseRAG {
 		updateStatus("Analyzing query...")
 		res.Reformulated = query
-		if cfg.UseExpansion {
+		if cfg.UseQueryExpansion {
 			ref, err := ai.ExpandQuery(ctx, query, chatHistory)
 			if err == nil {
 				res.Reformulated = ref

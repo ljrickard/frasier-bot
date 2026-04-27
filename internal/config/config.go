@@ -11,7 +11,7 @@ type RAGConfig struct {
 	UseMetadata            bool
 	UseQueryClassification bool
 	UseEpisodeLimit        bool
-	UseExpansion           bool
+	UseQueryExpansion      bool
 	UseReranker            bool
 	RerankerBackend        string // NEW: "gemini" or "local"
 	UsePersona             bool
@@ -23,7 +23,7 @@ type RAGConfig struct {
 func ParseFlags() *RAGConfig {
 	cfg := &RAGConfig{}
 
-	flag.BoolVar(&cfg.UseExpansion, "expansion", true, "Expand query keywords to match broader intent")
+	flag.BoolVar(&cfg.UseQueryExpansion, "queryexpansion", true, "Expand query keywords to match broader intent")
 	flag.BoolVar(&cfg.UseQueryClassification, "switchboard", true, "Dynamically adjust Top-K context size")
 	flag.BoolVar(&cfg.UseEpisodeLimit, "diversity", true, "Force search results to span different episodes")
 	flag.BoolVar(&cfg.UseMetadata, "metadata", true, "Inject [SxxExx] tags for chronological awareness")
@@ -53,7 +53,7 @@ func ParseFlags() *RAGConfig {
 		}
 
 		// If no explicit conflict, silently disable defaults for the Vanilla run
-		cfg.UseExpansion = false
+		cfg.UseQueryExpansion = false
 		cfg.UseQueryClassification = false
 		cfg.UseEpisodeLimit = false
 		cfg.UseMetadata = false
@@ -68,7 +68,7 @@ func (c *RAGConfig) PrintStatus() {
 		Name    string
 		Enabled bool
 	}{
-		{"Query Expansion", c.UseExpansion},
+		{"Query Query Expansion", c.UseQueryExpansion},
 		{"Query Classification", c.UseQueryClassification},
 		{"Episode Limit", c.UseEpisodeLimit},
 		{"Metadata Enrichment", c.UseMetadata},

@@ -11,7 +11,7 @@ import (
 	"frasier-bot/internal/database"
 )
 
-func TestFrasierRAG(t *testing.T) {
+func Test_Reranker(t *testing.T) {
 	// 1. Setup Environment
 	ctx := context.Background()
 	logger := log.New(os.Stdout, "", log.LstdFlags)
@@ -22,62 +22,32 @@ func TestFrasierRAG(t *testing.T) {
 	}
 	defer db.Close()
 
-	// 2. Define the Test Questions
-	// We use a mix of general knowledge (wives) and deep trivia (gangsters)
 	questions := []string{
 		"Who was Frasier married to?",
 		"Who was the gangster that Niles hired?",
 		"Why did Frasier and Martin fight so much?",
 	}
 
-	// 3. The Scientific Progression Matrix
-	// We start at zero-shot and add one major component at a time to measure the lift.
 	configs := []struct {
 		Name string
 		Cfg  *config.RAGConfig
 	}{
 		{
-			Name: "1_Vanilla_Baseline_(No_Database)",
-			// Pure LLM knowledge. Expect Faithfulness = 0.00, High Relevancy.
+			Name: "1_raranking_using_gemini",
 			Cfg: &config.RAGConfig{
-				UseRAG: false, UsePersona: false,
+				UseRAG: true, UseQueryExpansion: true, UseQueryClassification: true, UseReranker: true,
+				UseEpisodeLimit: true, UseMetadata: true, UsePersona: true, RerankerBackend: "gemini", UseEval: true,
 			},
 		},
 		{
-			Name: "2_Standard_RAG_(Basic_Search)",
-			// Turns on the DB, but leaves advanced reasoning off.
+			Name: "2_raranking_using_local_cross_embedded_model",
 			Cfg: &config.RAGConfig{
-				UseRAG: true, UseQueryExpansion: false, UseQueryClassification: false,
-				UseReranker: false, UseEpisodeLimit: false, UseMetadata: false, UsePersona: false,
-			},
-		},
-		{
-			Name: "3_Advanced_RAG_(Switchboard_+_Expansion)",
-			// Adds query expansion and dynamic context sizing.
-			Cfg: &config.RAGConfig{
-				UseRAG: true, UseQueryExpansion: true, UseQueryClassification: true,
-				UseReranker: false, UseEpisodeLimit: false, UseMetadata: false, UsePersona: false,
-			},
-		},
-		{
-			Name: "4_Production_Candidate_(Added_Reranker)",
-			// Turns on all the heavy ML lifting to find the perfect facts.
-			Cfg: &config.RAGConfig{
-				UseRAG: true, UseQueryExpansion: true, UseQueryClassification: true,
-				UseReranker: true, UseEpisodeLimit: true, UseMetadata: true, UsePersona: false,
-			},
-		},
-		{
-			Name: "5_Brand_Voice_(Production_+_Persona)",
-			// Production candidate, but adds the Persona to measure the Relevancy drop.
-			Cfg: &config.RAGConfig{
-				UseRAG: true, UseQueryExpansion: true, UseQueryClassification: true,
-				UseReranker: true, UseEpisodeLimit: true, UseMetadata: true, UsePersona: true,
+				UseRAG: true, UseQueryExpansion: true, UseQueryClassification: true, UseReranker: true,
+				UseEpisodeLimit: true, UseMetadata: true, UsePersona: true, RerankerBackend: "local", UseEval: true,
 			},
 		},
 	}
 
-	// 4. Run the Table Test Matrix
 	for _, conf := range configs {
 		t.Run(conf.Name, func(t *testing.T) {
 			var totalFaithfulness float64
