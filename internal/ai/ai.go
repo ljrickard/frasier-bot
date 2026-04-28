@@ -87,3 +87,7 @@ func (s *Service) ExpandQuery(ctx context.Context, query string) (string, error)
 	}
 	return result, nil
 }
+
+func (s *Service) EmbedQuery(ctx context.Context, query string) ([]float32, error) {
+	return s.LLM.EmbedText(ctx, query)
+}

@@ -17,10 +17,14 @@ import (
 	"frasier-bot/internal/search"
 )
 
+var (
+	startupTimeout = 10 * time.Second
+)
+
 type ChatRequest struct {
-	Query     string            `json:"query"`
-	SessionID string            `json:"session_id"`
-	Config    *config.RAGConfig `json:"config,omitempty"`
+	Query     string          `json:"query"`
+	SessionID string          `json:"session_id"`
+	Config    json.RawMessage `json:"config,omitempty"`
 }
 
 func main() {
@@ -35,8 +39,7 @@ func main() {
 	dsn := fmt.Sprintf("host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
 		os.Getenv("DB_HOST"), os.Getenv("DB_USER"), os.Getenv("DB_PASS"), os.Getenv("DB_NAME"))
 
-	// Startup context for DB connection and Ping
-	startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	startupCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()
 
 	db, err := database.Connect(startupCtx, dsn)
@@ -52,46 +55,31 @@ func main() {
 
 	baseCfg := config.LoadBaseConfig()
 
-	// ---------------------------------------------------------
-	// 1. Initialize External AI Clients
-	// ---------------------------------------------------------
-
-	// Gemini Configuration with Exponential Backoff
 	geminiCfg := gemini.Config{
-		ProjectID: os.Getenv("GEMINI_PROJECT"),
-		Location:  "us-central1",
-		Model:     "gemini-2.5-flash",
+		ProjectID:      os.Getenv("GEMINI_PROJECT"),
+		Location:       os.Getenv("GEMINI_LOCATION"),
+		Model:          os.Getenv("GEMINI_MODEL"),
+		EmbeddingModel: "text-embedding-004",
 		Retry: gemini.RetryConfig{
 			MaxRetries: 3,
 			BaseDelay:  2 * time.Second,
 		},
 	}
 
-	// Note: We use a fresh Background context here so the client isn't tied to the startup timeout
 	geminiClient, err := gemini.NewClient(context.Background(), geminiCfg)
 	if err != nil {
 		slog.Error("❌ Failed to initialize Gemini Client", "error", err)
 		os.Exit(1)
 	}
-	// Note: No defer geminiClient.Close() needed for the new unified SDK!
 
-	// Cross-Encoder Configuration
 	encoderURL := os.Getenv("CROSS_ENCODER_URL")
 	if encoderURL == "" {
 		slog.Warn("⚠️ CROSS_ENCODER_URL not set, local reranking will fail")
 	}
+
 	encoderClient := crossencoder.NewClient(encoderURL)
 
-	// ---------------------------------------------------------
-	// 2. Assemble the AI Service
-	// ---------------------------------------------------------
-
-	// Inject the network clients into our domain service
 	aiService := ai.NewService(geminiClient, encoderClient)
-
-	// ---------------------------------------------------------
-	// 3. HTTP Router Setup
-	// ---------------------------------------------------------
 
 	mux := http.NewServeMux()
 
@@ -106,20 +94,24 @@ func main() {
 			return
 		}
 
-		activeCfg := baseCfg
-		if req.Config != nil {
-			activeCfg = req.Config
-			slog.Debug("Using request-provided RAG configuration overrides", "session_id", req.SessionID)
+		// 2. Dereference baseCfg to create a brand new COPY by value
+		activeCfg := *baseCfg
+
+		// 3. Unpack the partial JSON directly over our copy!
+		if len(req.Config) > 0 {
+			if err := json.Unmarshal(req.Config, &activeCfg); err != nil {
+				slog.Error("⚠️ Failed to merge config overrides, falling back to base config", "error", err)
+			} else {
+				slog.Debug("🔧 Merged request-provided RAG overrides", "session_id", req.SessionID)
+			}
 		}
 
 		// Fail-fast context for the HTTP request to prevent upstream gateway hangs
-		reqCtx, reqCancel := context.WithTimeout(r.Context(), 25*time.Second)
+		reqCtx, reqCancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer reqCancel()
 
-		slog.Info("🧠 RAG Pipeline Executing", "session_id", req.SessionID)
-
-		// Pass the aiService deep into your pipeline execution
-		res, err := search.RunRAGPipeline(reqCtx, db, activeCfg, aiService, req.Query)
+		// 4. Pass a pointer to our newly merged activeCfg
+		res, err := search.RunRAGPipeline(reqCtx, db, &activeCfg, aiService, req.Query)
 		if err != nil {
 			if reqCtx.Err() == context.DeadlineExceeded {
 				slog.Error("Pipeline Timed Out", "session_id", req.SessionID)
