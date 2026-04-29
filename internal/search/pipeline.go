@@ -106,9 +106,6 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 
 		// Step 3: Embeddings
 		slog.Info("🧮 [Step 3/6] Generating Embeddings via Vertex AI...")
-
-		// Step 3: Embeddings
-		slog.Info("🧮 [Step 3/6] Generating Embeddings via Vertex AI...")
 		queryEmbedding, err := aiSvc.EmbedQuery(ctx, res.Reformulated)
 		if err != nil {
 			return res, fmt.Errorf("embedding error: %w", err)
