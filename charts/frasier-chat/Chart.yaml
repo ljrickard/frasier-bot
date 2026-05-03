@@ -2,5 +2,5 @@ apiVersion: v2
 name: frasier-chat
 description: The core RAG and Chat API for the Frasier Bot
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "1.0.0"

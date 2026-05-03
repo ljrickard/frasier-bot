@@ -5,7 +5,7 @@ metadata:
   labels:
     app: {{ .Release.Name }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: 2 # <-- High Availability enabled
   selector:
     matchLabels:
       app: {{ .Release.Name }}
@@ -18,6 +18,18 @@ spec:
         rollme: {{ randAlphaNum 5 | quote }}
     spec:
       serviceAccountName: frasier-chat-ksa
+      # --- THE SPOT INSTANCE HA CHEAT CODE ---
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - {{ .Release.Name }}
+            topologyKey: "kubernetes.io/hostname"
+      # ---------------------------------------
       containers:
         - name: chat-api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -25,6 +37,16 @@ spec:
           ports:
             - containerPort: {{ .Values.ports.targetPort }}
           
+          # --- RIGHT-SIZING FOR THE CHEAP POOL ---
+          resources:
+            requests:
+              cpu: "500m"   # <-- 0.5 vCPU
+              memory: "2Gi"
+            limits:
+              cpu: "500m"
+              memory: "2Gi"
+          # ---------------------------------------
+
           # Injecting the Environment Variables for the Go App
           env:
             - name: LOGGING_LEVEL
@@ -32,7 +54,7 @@ spec:
             - name: CROSS_ENCODER_URL
               value: {{ .Values.env.CROSS_ENCODER_URL | quote }}
             
-# Database mapping
+            # Database mapping
             - name: DB_NAME
               value: {{ .Values.db.name | quote }}
             - name: DB_USER

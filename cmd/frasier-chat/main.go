@@ -15,10 +15,13 @@ import (
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/gemini"
 	"frasier-bot/internal/search"
+
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
+	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 )
 
 var (
-	startupTimeout = 10 * time.Second
+	startupTimeout = 30 * time.Second
 )
 
 type ChatRequest struct {
@@ -55,11 +58,20 @@ func main() {
 
 	baseCfg := config.LoadBaseConfig()
 
+	projectID := "pisces-12" // Or load from env like os.Getenv("GOOGLE_CLOUD_PROJECT")
+	slog.Info("Fetching API key from Secret Manager...")
+	apiKey, err := getSecret(startupCtx, projectID, "gemini-api-key")
+	if err != nil {
+		slog.Error("Error loading API key", "error", err)
+		os.Exit(1)
+	}
+
 	geminiCfg := gemini.Config{
 		ProjectID:      os.Getenv("GEMINI_PROJECT"),
 		Location:       os.Getenv("GEMINI_LOCATION"),
-		Model:          os.Getenv("GEMINI_MODEL"),
-		EmbeddingModel: "text-embedding-004",
+		TextModel:      os.Getenv("GEMINI_MODEL"),
+		APIKey:         apiKey,
+		EmbeddingModel: "gemini-embedding-001",
 		Retry: gemini.RetryConfig{
 			MaxRetries: 3,
 			BaseDelay:  2 * time.Second,
@@ -78,7 +90,6 @@ func main() {
 	}
 
 	encoderClient := crossencoder.NewClient(encoderURL)
-
 	aiService := ai.NewService(geminiClient, encoderClient)
 
 	mux := http.NewServeMux()
@@ -132,4 +143,25 @@ func main() {
 
 	slog.Info("🤖 Frasier Bot API Listening on :8080")
 	http.ListenAndServe(":8080", mux)
+}
+
+// getSecret securely fetches the string value of a secret from GCP Secret Manager
+func getSecret(ctx context.Context, projectID, secretName string) (string, error) {
+	smClient, err := secretmanager.NewClient(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to create Secret Manager client: %v", err)
+	}
+	defer smClient.Close()
+
+	versionPath := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", projectID, secretName)
+	req := &secretmanagerpb.AccessSecretVersionRequest{
+		Name: versionPath,
+	}
+
+	result, err := smClient.AccessSecretVersion(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to access secret version: %v", err)
+	}
+
+	return string(result.Payload.Data), nil
 }

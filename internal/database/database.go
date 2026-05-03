@@ -108,3 +108,27 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 
 	return nil
 }
+
+// WipeDatabase drops the entire public schema and recreates it.
+// WARNING: This is destructive and will delete all tables, types, and extensions.
+func (db *DB) WipeDatabase(ctx context.Context) error {
+	// 1. Drop the schema and everything in it
+	_, err := db.Pool.Exec(ctx, "DROP SCHEMA public CASCADE;")
+	if err != nil {
+		return fmt.Errorf("failed to drop public schema: %v", err)
+	}
+
+	// 2. Recreate the empty schema
+	_, err = db.Pool.Exec(ctx, "CREATE SCHEMA public;")
+	if err != nil {
+		return fmt.Errorf("failed to recreate public schema: %v", err)
+	}
+
+	// 3. Re-grant permissions (default behavior in Postgres)
+	_, err = db.Pool.Exec(ctx, "GRANT ALL ON SCHEMA public TO public;")
+	if err != nil {
+		return fmt.Errorf("failed to grant schema permissions: %v", err)
+	}
+
+	return nil
+}
