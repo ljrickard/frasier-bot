@@ -17,7 +17,8 @@ type RAGResult struct {
 	Answer         string
 	Scores         map[string]any
 	EvalErr        error
-	Contexts       []models.SearchResult
+	Contexts       []models.SearchResult // The top K sent to the LLM
+	RawContexts    []models.SearchResult // NEW: The full 50 from pgvector
 	Reformulated   string
 	Classification string
 	FetchK         int
@@ -122,6 +123,9 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 			return res, fmt.Errorf("no relevant transcripts found")
 		}
 		slog.Info("✅ [Step 4/6] Transcripts Retrieved", "chunks_found", len(searchResultsForAI))
+
+		res.RawContexts = make([]models.SearchResult, len(searchResultsForAI))
+		copy(res.RawContexts, searchResultsForAI)
 
 		// Step 5: Reranking
 		res.PreRerankCount = len(searchResultsForAI)

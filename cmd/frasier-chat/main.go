@@ -137,7 +137,8 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"answer":       res.Answer,
 			"reformulated": res.Reformulated,
-			"episodes":     res.Contexts,
+			"contexts":     res.Contexts,
+			"raw_contexts": res.RawContexts,
 		})
 	})
 
