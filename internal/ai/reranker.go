@@ -94,7 +94,7 @@ func (s *Service) rerankWithGemini(ctx context.Context, query string, chunks []m
 
 	prompt := fmt.Sprintf(promptRerank, query, chunkList.String())
 
-	response, err := s.LLM.GenerateText(ctx, prompt)
+	response, err := s.LLM.GenerateText(ctx, prompt, defaultTemperature)
 	if err != nil {
 		return nil, fmt.Errorf("failed to rerank chunks: %w", err)
 	}

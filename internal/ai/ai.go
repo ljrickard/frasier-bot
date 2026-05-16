@@ -12,6 +12,10 @@ import (
 	"frasier-bot/tracing"
 )
 
+const (
+	defaultTemperature = float32(0.0)
+)
+
 type Service struct {
 	LLM     *gemini.Client
 	Encoder *crossencoder.Client
@@ -27,6 +31,7 @@ func NewService(llm *gemini.Client, encoder *crossencoder.Client) *Service {
 func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []models.SearchResult, usePersona bool) (string, error) {
 	traceID := tracing.GetTraceID(ctx)
 	var prompt string
+	temperature := defaultTemperature
 
 	slog.Debug("🤖 [Service] Constructing context-grounded prompt compilation pipeline", "use_persona", usePersona, "chunks_count", len(chunks), "trace_id", traceID)
 
@@ -48,12 +53,13 @@ func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []mod
 
 		if usePersona {
 			prompt = fmt.Sprintf(promptPersonaRAG, contextBuilder.String(), query)
+			temperature = 0.2
 		} else {
 			prompt = fmt.Sprintf(promptStandardRAG, contextBuilder.String(), query)
 		}
 	}
 
-	answer, err := s.LLM.GenerateText(ctx, prompt)
+	answer, err := s.LLM.GenerateText(ctx, prompt, temperature)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate answer: %w", err)
 	}
@@ -67,7 +73,7 @@ func (s *Service) ClassifyQuery(ctx context.Context, query string) (string, erro
 
 	prompt := fmt.Sprintf(promptClassify, query)
 
-	response, err := s.LLM.GenerateText(ctx, prompt)
+	response, err := s.LLM.GenerateText(ctx, prompt, defaultTemperature)
 	if err != nil {
 		return "", fmt.Errorf("failed to classify query: %w", err)
 	}
@@ -85,7 +91,7 @@ func (s *Service) ExpandQuery(ctx context.Context, query string) (string, error)
 
 	prompt := fmt.Sprintf(promptReformulate, query)
 
-	response, err := s.LLM.GenerateText(ctx, prompt)
+	response, err := s.LLM.GenerateText(ctx, prompt, defaultTemperature)
 	if err != nil {
 		return "", fmt.Errorf("failed to reformulate query: %w", err)
 	}
