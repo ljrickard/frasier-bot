@@ -57,9 +57,9 @@ func (s *Service) rerankWithLocal(ctx context.Context, query string, chunks []mo
 		passages[i] = c.Content
 	}
 
-	scores, err := s.Encoder.Rerank(ctx, query, passages)
+	scores, err := s.Reranker.Rerank(ctx, query, passages)
 	if err != nil {
-		return nil, fmt.Errorf("cross-encoder service failed: %w", err)
+		return nil, fmt.Errorf("reranker backend service failed: %w", err)
 	}
 
 	sort.Slice(scores, func(i, j int) bool {

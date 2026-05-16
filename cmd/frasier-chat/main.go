@@ -108,6 +108,7 @@ func main() {
 	}
 
 	encoderClient := crossencoder.NewClient(encoderURL)
+
 	aiService := ai.NewService(geminiClient, encoderClient)
 
 	mux := http.NewServeMux()

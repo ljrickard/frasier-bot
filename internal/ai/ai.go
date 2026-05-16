@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"frasier-bot/internal/crossencoder"
-	"frasier-bot/internal/gemini"
+	"frasier-bot/internal/llm"
 	"frasier-bot/internal/models"
 	"frasier-bot/tracing"
 )
@@ -16,15 +16,19 @@ const (
 	defaultTemperature = float32(0.0)
 )
 
-type Service struct {
-	LLM     *gemini.Client
-	Encoder *crossencoder.Client
+type Reranker interface {
+	Rerank(ctx context.Context, query string, passages []string) ([]crossencoder.RerankResponse, error)
 }
 
-func NewService(llm *gemini.Client, encoder *crossencoder.Client) *Service {
+type Service struct {
+	LLM      llm.Client
+	Reranker Reranker
+}
+
+func NewService(llm llm.Client, reranker Reranker) *Service {
 	return &Service{
-		LLM:     llm,
-		Encoder: encoder,
+		LLM:      llm,
+		Reranker: reranker,
 	}
 }
 
@@ -38,6 +42,7 @@ func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []mod
 	if len(chunks) == 0 {
 		if usePersona {
 			prompt = fmt.Sprintf(promptPersonaVanilla, query)
+			temperature = 0.2
 		} else {
 			prompt = fmt.Sprintf(promptStandardVanilla, query)
 		}

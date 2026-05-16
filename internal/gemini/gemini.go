@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"frasier-bot/internal/llm"
 	"frasier-bot/tracing"
 
 	"google.golang.org/genai"
@@ -78,7 +79,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 func (c *Client) GenerateText(ctx context.Context, prompt string, temperature float32) (string, error) {
 	traceID := tracing.GetTraceID(ctx)
 
-	slog.Debug("🤖 [Gemini LLM] Dispatching text generation request content", "model", c.textModel, "trace_id", traceID)
+	slog.Debug("🤖 [Gemini LLM] Dispatching text generation request content", "model", c.textModel, "temperature", temperature, "trace_id", traceID)
 
 	resp, err := executeWithRetry(ctx, c.retryCfg, func() (*genai.GenerateContentResponse, error) {
 		return c.rawClient.Models.GenerateContent(ctx, c.textModel, genai.Text(prompt), &genai.GenerateContentConfig{
@@ -97,6 +98,35 @@ func (c *Client) GenerateText(ctx context.Context, prompt string, temperature fl
 	}
 
 	return answer, nil
+}
+
+func (c *Client) GenerateTextStream(ctx context.Context, prompt string, temperature float32) (<-chan llm.StreamResult, error) {
+	traceID := tracing.GetTraceID(ctx)
+	out := make(chan llm.StreamResult, 100)
+
+	slog.Debug("🤖 [Gemini LLM] Initiating streaming content generation pipeline", "model", c.textModel, "temperature", temperature, "trace_id", traceID)
+
+	go func() {
+		defer close(out)
+
+		// Utilize Google GenAI SDK's native range loop stream iterator
+		for chunk, err := range c.rawClient.Models.GenerateContentStream(ctx, c.textModel, genai.Text(prompt), &genai.GenerateContentConfig{
+			Temperature: &temperature,
+		}) {
+			if err != nil {
+				slog.Error("❌ [Gemini LLM] Mid-stream connection drop or error encountered", "trace_id", traceID, "error", err)
+				out <- llm.StreamResult{Err: err}
+				return
+			}
+
+			text := c.extractText(chunk)
+			if text != "" {
+				out <- llm.StreamResult{Text: text}
+			}
+		}
+	}()
+
+	return out, nil
 }
 
 func (c *Client) EmbedText(ctx context.Context, text string) ([]float32, error) {
