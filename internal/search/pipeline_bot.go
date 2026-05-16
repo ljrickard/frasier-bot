@@ -7,6 +7,7 @@ import (
 	"frasier-bot/internal/config"
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/models"
+	"frasier-bot/tracing"
 	"log/slog"
 	"strings"
 
@@ -19,8 +20,8 @@ type RAGResult struct {
 	Answer         string
 	Scores         map[string]any
 	EvalErr        error
-	Contexts       []models.SearchResult // The top K sent to the LLM
-	RawContexts    []models.SearchResult // The full 50 from pgvector
+	Contexts       []models.SearchResult
+	RawContexts    []models.SearchResult
 	Reformulated   string
 	Classification string
 	FetchK         int
@@ -30,21 +31,20 @@ type RAGResult struct {
 }
 
 func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig, aiSvc *ai.Service, query string) (RAGResult, error) {
-	// 1. Grab the tracer and start the parent span
 	tracer := otel.Tracer("frasier-rag-pipeline")
 	ctx, span := tracer.Start(ctx, "Search.RunRAGPipeline")
 	defer span.End()
 
+	traceID := tracing.GetTraceID(ctx)
 	var res RAGResult
 	var searchResultsForAI []models.SearchResult
 
-	slog.Info("🚀 [Step 0/6] RAG Pipeline Initiated", "query", query)
+	slog.Info("🚀 [Step 0/6] RAG Pipeline Initiated", "query", query, "trace_id", traceID)
 
 	if cfg.UseRAG {
-		// Step 1: Query Expansion
 		res.Reformulated = query
 		if cfg.UseQueryExpansion {
-			slog.Info("🔍 [Step 1/6] Expanding Query...")
+			slog.Info("🔍 [Step 1/6] Expanding Query...", "trace_id", traceID)
 
 			ctx, expSpan := tracer.Start(ctx, "AI.ExpandQuery")
 			ref, err := aiSvc.ExpandQuery(ctx, query)
@@ -52,19 +52,18 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 
 			if err == nil {
 				res.Reformulated = ref
-				slog.Info("✅ [Step 1/6] Query Expanded", "reformulated", res.Reformulated)
+				slog.Info("✅ [Step 1/6] Query Expanded", "reformulated", res.Reformulated, "trace_id", traceID)
 			}
 		} else {
-			slog.Info("⏩ [Step 1/6] Query Expansion Skipped")
+			slog.Info("⏩ [Step 1/6] Query Expansion Skipped", "trace_id", traceID)
 		}
 
-		// Step 2: Classification (Switchboard)
 		res.FetchK = cfg.FetchK
 		res.FinalK = cfg.FinalK
 		res.EpisodeLimit = 3
 
 		if cfg.UseQueryClassification {
-			slog.Info("🧠 [Step 2/6] Classifying Query Intent...")
+			slog.Info("🧠 [Step 2/6] Classifying Query Intent...", "trace_id", traceID)
 
 			ctx, classSpan := tracer.Start(ctx, "AI.ClassifyQuery")
 			classification, err := aiSvc.ClassifyQuery(ctx, res.Reformulated)
@@ -74,9 +73,8 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 				classification = "GENERAL"
 			}
 			res.Classification = classification
-			slog.Info("✅ [Step 2/6] Query Classified", "intent", res.Classification)
+			slog.Info("✅ [Step 2/6] Query Classified", "intent", res.Classification, "trace_id", traceID)
 
-			// Proportional Scaling for Specific Queries
 			if classification == "SPECIFIC" {
 				originalFetch := res.FetchK
 				originalFinal := res.FinalK
@@ -98,13 +96,14 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 					"new_fetch", res.FetchK,
 					"original_final", originalFinal,
 					"new_final", res.FinalK,
+					"trace_id", traceID,
 				)
 			}
 		} else {
 			res.Classification = "OFF"
 			res.FetchK = 10
 			res.FinalK = 5
-			slog.Info("⏩ [Step 2/6] Query Classification Skipped (Using hardcoded OFF defaults)")
+			slog.Info("⏩ [Step 2/6] Query Classification Skipped (Using hardcoded OFF defaults)", "trace_id", traceID)
 		}
 
 		slog.Info("⚙️ [Step 2/6] Active Configuration Locked",
@@ -112,10 +111,10 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 			"fetch_k", res.FetchK,
 			"final_k", res.FinalK,
 			"episode_limit", res.EpisodeLimit,
+			"trace_id", traceID,
 		)
 
-		// Step 3: Embeddings
-		slog.Info("🧮 [Step 3/6] Generating Embeddings via Vertex AI...")
+		slog.Info("🧮 [Step 3/6] Generating Embeddings via Vertex AI...", "trace_id", traceID)
 
 		ctx, embedSpan := tracer.Start(ctx, "VertexAI.EmbedQuery")
 		queryEmbedding, err := aiSvc.EmbedQuery(ctx, res.Reformulated)
@@ -125,8 +124,7 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 			return res, fmt.Errorf("embedding error: %w", err)
 		}
 
-		// Step 4: Vector Search
-		slog.Info("🔎 [Step 4/6] Executing Vector Search in pgvector...", "fetch_limit", res.FetchK)
+		slog.Info("🔎 [Step 4/6] Executing Vector Search in pgvector...", "fetch_limit", res.FetchK, "trace_id", traceID)
 
 		ctx, dbSpan := tracer.Start(ctx, "Postgres.pgvectorSearch")
 		if cfg.UseEpisodeLimit {
@@ -139,15 +137,14 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 		if err != nil || len(searchResultsForAI) == 0 {
 			return res, fmt.Errorf("no relevant transcripts found")
 		}
-		slog.Info("✅ [Step 4/6] Transcripts Retrieved", "chunks_found", len(searchResultsForAI))
+		slog.Info("✅ [Step 4/6] Transcripts Retrieved", "chunks_found", len(searchResultsForAI), "trace_id", traceID)
 
 		res.RawContexts = make([]models.SearchResult, len(searchResultsForAI))
 		copy(res.RawContexts, searchResultsForAI)
 
-		// Step 5: Reranking
 		res.PreRerankCount = len(searchResultsForAI)
 		if cfg.UseReranker {
-			slog.Info("⚖️ [Step 5/6] Reranking Results via Cross-Encoder...", "backend", cfg.RerankerBackend)
+			slog.Info("⚖️ [Step 5/6] Reranking Results via Cross-Encoder...", "backend", cfg.RerankerBackend, "trace_id", traceID)
 
 			ctx, rankSpan := tracer.Start(ctx, "CrossEncoder.Rerank")
 			reranked, err := aiSvc.RerankChunks(ctx, cfg.RerankerBackend, res.Reformulated, searchResultsForAI, res.FinalK)
@@ -155,15 +152,15 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 
 			if err == nil {
 				searchResultsForAI = reranked
-				slog.Info("✅ [Step 5/6] Reranking Complete")
+				slog.Info("✅ [Step 5/6] Reranking Complete", "trace_id", traceID)
 			} else {
-				slog.Warn("⚠️ [Step 5/6] Reranking Failed, falling back to vector similarity", "error", err)
+				slog.Warn("⚠️ [Step 5/6] Reranking Failed, falling back to vector similarity", "trace_id", traceID, "error", err)
 				if len(searchResultsForAI) > res.FinalK {
 					searchResultsForAI = searchResultsForAI[:res.FinalK]
 				}
 			}
 		} else {
-			slog.Info("⏩ [Step 5/6] Reranking Skipped")
+			slog.Info("⏩ [Step 5/6] Reranking Skipped", "trace_id", traceID)
 			if len(searchResultsForAI) > res.FinalK {
 				searchResultsForAI = searchResultsForAI[:res.FinalK]
 			}
@@ -171,11 +168,10 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 		res.Contexts = searchResultsForAI
 
 	} else {
-		slog.Info("⏩ [Steps 1-5 Skipped] Bypassing RAG (Vanilla AI mode)")
+		slog.Info("⏩ [Steps 1-5 Skipped] Bypassing RAG (Vanilla AI mode)", "trace_id", traceID)
 		res.Classification = "VANILLA"
 	}
 
-	// Build context string
 	var contextBuilder strings.Builder
 	for i, c := range searchResultsForAI {
 		contextBuilder.WriteString(fmt.Sprintf("Chunk %d:\n", i+1))
@@ -185,8 +181,7 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 		contextBuilder.WriteString(fmt.Sprintf("Content: %s\n\n", c.Content))
 	}
 
-	// Step 6: Generation
-	slog.Info("🤖 [Step 6/6] Generating Final LLM Answer via Gemini...")
+	slog.Info("🤖 [Step 6/6] Generating Final LLM Answer via Gemini...", "trace_id", traceID)
 
 	ctx, genSpan := tracer.Start(ctx, "Gemini.GenerateFinalAnswer")
 	ragAnswer, err := aiSvc.GenerateAnswer(ctx, query, searchResultsForAI, cfg.UsePersona)
@@ -196,7 +191,7 @@ func RunRAGPipeline(ctx context.Context, db *database.DB, cfg *config.RAGConfig,
 		return res, fmt.Errorf("generation error: %w", err)
 	}
 	res.Answer = ragAnswer
-	slog.Info("🏁 Pipeline Complete", "answer_length", len(res.Answer))
+	slog.Info("🏁 Pipeline Complete", "answer_length", len(res.Answer), "trace_id", traceID)
 
 	return res, nil
 }

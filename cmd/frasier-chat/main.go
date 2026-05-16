@@ -15,6 +15,7 @@ import (
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/gemini"
 	"frasier-bot/internal/search"
+	"frasier-bot/tracing"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -47,7 +48,6 @@ func main() {
 
 	slog.Info("🚀 Frasier Chat Service starting...")
 
-	// Initialize OpenTelemetry!
 	tp, err := initTracer("pisces-12")
 	if err != nil {
 		slog.Error("❌ Failed to initialize tracing", "error", err)
@@ -76,7 +76,7 @@ func main() {
 
 	baseCfg := config.LoadBaseConfig()
 
-	projectID := "pisces-12" // Or load from env like os.Getenv("GOOGLE_CLOUD_PROJECT")
+	projectID := "pisces-12"
 	slog.Info("Fetching API key from Secret Manager...")
 	apiKey, err := getSecret(startupCtx, projectID, "gemini-api-key")
 	if err != nil {
@@ -117,37 +117,37 @@ func main() {
 	})
 
 	chatHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		traceID := tracing.GetTraceID(ctx)
+
 		var req ChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			slog.Warn("Malformed request body inbound to downstream bot", "trace_id", traceID, "error", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
 
-		// 2. Dereference baseCfg to create a brand new COPY by value
 		activeCfg := *baseCfg
 
-		// 3. Unpack the partial JSON directly over our copy!
 		if len(req.Config) > 0 {
 			if err := json.Unmarshal(req.Config, &activeCfg); err != nil {
-				slog.Error("⚠️ Failed to merge config overrides, falling back to base config", "error", err)
+				slog.Error("⚠️ Failed to merge config overrides, falling back to base config", "session_id", req.SessionID, "trace_id", traceID, "error", err)
 			} else {
-				slog.Debug("🔧 Merged request-provided RAG overrides", "session_id", req.SessionID)
+				slog.Debug("🔧 Merged request-provided RAG overrides", "session_id", req.SessionID, "trace_id", traceID)
 			}
 		}
 
-		// Fail-fast context for the HTTP request to prevent upstream gateway hangs
-		reqCtx, reqCancel := context.WithTimeout(r.Context(), 60*time.Second)
+		reqCtx, reqCancel := context.WithTimeout(ctx, 60*time.Second)
 		defer reqCancel()
 
-		// 4. Pass a pointer to our newly merged activeCfg
 		res, err := search.RunRAGPipeline(reqCtx, db, &activeCfg, aiService, req.Query)
 		if err != nil {
 			if reqCtx.Err() == context.DeadlineExceeded {
-				slog.Error("Pipeline Timed Out", "session_id", req.SessionID)
+				slog.Error("Pipeline Timed Out", "session_id", req.SessionID, "trace_id", traceID)
 				http.Error(w, "Request Timed Out", http.StatusGatewayTimeout)
 				return
 			}
-			slog.Error("Pipeline Error", "error", err, "session_id", req.SessionID)
+			slog.Error("Pipeline Error", "session_id", req.SessionID, "trace_id", traceID, "error", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -166,7 +166,6 @@ func main() {
 	http.ListenAndServe(":8080", mux)
 }
 
-// getSecret securely fetches the string value of a secret from GCP Secret Manager
 func getSecret(ctx context.Context, projectID, secretName string) (string, error) {
 	smClient, err := secretmanager.NewClient(ctx)
 	if err != nil {
@@ -186,13 +185,13 @@ func getSecret(ctx context.Context, projectID, secretName string) (string, error
 
 	return string(result.Payload.Data), nil
 }
+
 func initTracer(projectID string) (*sdktrace.TracerProvider, error) {
 	exporter, err := texporter.New(texporter.WithProjectID(projectID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GCP trace exporter: %w", err)
 	}
 
-	// NEW: Use resource.New instead of resource.Merge to avoid schema URL conflicts!
 	res, err := resource.New(context.Background(),
 		resource.WithAttributes(
 			semconv.ServiceName("frasier-bot"),

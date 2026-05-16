@@ -3,17 +3,18 @@ package ai
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"frasier-bot/internal/crossencoder"
 	"frasier-bot/internal/gemini"
 	"frasier-bot/internal/models"
+	"frasier-bot/tracing"
 )
 
-// Service encapsulates external clients
 type Service struct {
 	LLM     *gemini.Client
-	Encoder *crossencoder.Client // Added Cross-Encoder
+	Encoder *crossencoder.Client
 }
 
 func NewService(llm *gemini.Client, encoder *crossencoder.Client) *Service {
@@ -24,7 +25,10 @@ func NewService(llm *gemini.Client, encoder *crossencoder.Client) *Service {
 }
 
 func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []models.SearchResult, usePersona bool) (string, error) {
+	traceID := tracing.GetTraceID(ctx)
 	var prompt string
+
+	slog.Debug("🤖 [Service] Constructing context-grounded prompt compilation pipeline", "use_persona", usePersona, "chunks_count", len(chunks), "trace_id", traceID)
 
 	if len(chunks) == 0 {
 		if usePersona {
@@ -49,7 +53,6 @@ func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []mod
 		}
 	}
 
-	// The wrapper handles retries, extraction, and temperature internally now!
 	answer, err := s.LLM.GenerateText(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate answer: %w", err)
@@ -59,6 +62,9 @@ func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []mod
 }
 
 func (s *Service) ClassifyQuery(ctx context.Context, query string) (string, error) {
+	traceID := tracing.GetTraceID(ctx)
+	slog.Debug("🧠 [Service] Dispatching classification request to intent switchboard", "trace_id", traceID)
+
 	prompt := fmt.Sprintf(promptClassify, query)
 
 	response, err := s.LLM.GenerateText(ctx, prompt)
@@ -74,6 +80,9 @@ func (s *Service) ClassifyQuery(ctx context.Context, query string) (string, erro
 }
 
 func (s *Service) ExpandQuery(ctx context.Context, query string) (string, error) {
+	traceID := tracing.GetTraceID(ctx)
+	slog.Debug("🔍 [Service] Transforming query parameters via reformulation rules", "trace_id", traceID)
+
 	prompt := fmt.Sprintf(promptReformulate, query)
 
 	response, err := s.LLM.GenerateText(ctx, prompt)

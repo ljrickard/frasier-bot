@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 
 	"frasier-bot/internal/models"
+	"frasier-bot/tracing"
 )
 
 type RerankChunk struct {
@@ -20,8 +21,8 @@ type RerankChunk struct {
 	Score    float64
 }
 
-// RerankChunks acts as a router for different reranking backends.
 func (s *Service) RerankChunks(ctx context.Context, backend string, query string, chunks []models.SearchResult, topN int) ([]models.SearchResult, error) {
+	traceID := tracing.GetTraceID(ctx)
 	if len(chunks) <= topN {
 		return chunks, nil
 	}
@@ -32,14 +33,10 @@ func (s *Service) RerankChunks(ctx context.Context, backend string, query string
 	case "gemini":
 		return s.rerankWithGemini(ctx, query, chunks, topN)
 	default:
-		log.Printf("WARN: Unknown reranker backend '%s', defaulting to gemini", backend)
+		slog.Warn("⚠️ Unknown reranker backend matching payload router, defaulting to gemini", "backend", backend, "trace_id", traceID)
 		return s.rerankWithGemini(ctx, query, chunks, topN)
 	}
 }
-
-// ==========================================
-// LOCAL CROSS-ENCODER IMPLEMENTATION
-// ==========================================
 
 type localRerankReq struct {
 	Query    string   `json:"query"`
@@ -52,24 +49,23 @@ type localRerankResp struct {
 }
 
 func (s *Service) rerankWithLocal(ctx context.Context, query string, chunks []models.SearchResult, topN int) ([]models.SearchResult, error) {
-	// 1. Prepare passages
+	traceID := tracing.GetTraceID(ctx)
+	slog.Debug("⚖️ [Reranker] Calling local cross-encoder model matrix calculations", "passages_count", len(chunks), "trace_id", traceID)
+
 	passages := make([]string, len(chunks))
 	for i, c := range chunks {
 		passages[i] = c.Content
 	}
 
-	// 2. Call the new injected client
 	scores, err := s.Encoder.Rerank(ctx, query, passages)
 	if err != nil {
 		return nil, fmt.Errorf("cross-encoder service failed: %w", err)
 	}
 
-	// 3. Sort descending
 	sort.Slice(scores, func(i, j int) bool {
 		return scores[i].Score > scores[j].Score
 	})
 
-	// 4. Build the final Top-N slice
 	var reranked []models.SearchResult
 	for _, scoreItem := range scores {
 		if scoreItem.Index >= 0 && scoreItem.Index < len(chunks) {
@@ -84,6 +80,9 @@ func (s *Service) rerankWithLocal(ctx context.Context, query string, chunks []mo
 }
 
 func (s *Service) rerankWithGemini(ctx context.Context, query string, chunks []models.SearchResult, topN int) ([]models.SearchResult, error) {
+	traceID := tracing.GetTraceID(ctx)
+	slog.Debug("⚖️ [Reranker] Inbound request routing to Gemini-fallback zero-shot relevance list grading", "passages_count", len(chunks), "trace_id", traceID)
+
 	var chunkList strings.Builder
 	for i, c := range chunks {
 		content := c.Content
@@ -95,23 +94,20 @@ func (s *Service) rerankWithGemini(ctx context.Context, query string, chunks []m
 
 	prompt := fmt.Sprintf(promptRerank, query, chunkList.String())
 
-	// Use the wrapper!
 	response, err := s.LLM.GenerateText(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to rerank chunks: %w", err)
 	}
 
 	result := strings.TrimSpace(response)
-	// Safely extract content between ```json and ``` regardless of surrounding text
 	startIdx := strings.Index(result, "```json")
 	if startIdx != -1 {
-		result = result[startIdx+7:] // skip past ```json
+		result = result[startIdx+7:]
 		endIdx := strings.Index(result, "```")
 		if endIdx != -1 {
 			result = result[:endIdx]
 		}
 	} else {
-		// Sometimes it just outputs ``` without the "json" tag
 		startIdx = strings.Index(result, "```")
 		if startIdx != -1 {
 			result = result[startIdx+3:]
@@ -130,7 +126,7 @@ func (s *Service) rerankWithGemini(ctx context.Context, query string, chunks []m
 
 	var scores []scoreEntry
 	if err := json.Unmarshal([]byte(result), &scores); err != nil {
-		log.Printf("WARN: reranker JSON parse failed, using original order: %v", err)
+		slog.Warn("⚠️ Reranker JSON block parse failed, defaulting structurally to raw vector similarity ranks", "trace_id", traceID, "error", err)
 		if len(chunks) > topN {
 			return chunks[:topN], nil
 		}
