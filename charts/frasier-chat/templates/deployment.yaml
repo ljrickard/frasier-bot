@@ -5,7 +5,7 @@ metadata:
   labels:
     app: {{ .Release.Name }}
 spec:
-  replicas: 2 # <-- High Availability enabled
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}
@@ -53,7 +53,9 @@ spec:
               value: {{ .Values.env.LOGGING_LEVEL | quote }}
             - name: CROSS_ENCODER_URL
               value: {{ .Values.env.CROSS_ENCODER_URL | quote }}
-            
+            - name: RAG_RERANKER_BACKEND
+              value: {{ .Values.env.RAG_RERANKER_BACKEND | quote }}
+            # gemini
             # Database mapping
             - name: DB_NAME
               value: {{ .Values.db.name | quote }}

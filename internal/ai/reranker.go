@@ -102,9 +102,25 @@ func (s *Service) rerankWithGemini(ctx context.Context, query string, chunks []m
 	}
 
 	result := strings.TrimSpace(response)
-	result = strings.TrimPrefix(result, "```json")
-	result = strings.TrimPrefix(result, "```")
-	result = strings.TrimSuffix(result, "```")
+	// Safely extract content between ```json and ``` regardless of surrounding text
+	startIdx := strings.Index(result, "```json")
+	if startIdx != -1 {
+		result = result[startIdx+7:] // skip past ```json
+		endIdx := strings.Index(result, "```")
+		if endIdx != -1 {
+			result = result[:endIdx]
+		}
+	} else {
+		// Sometimes it just outputs ``` without the "json" tag
+		startIdx = strings.Index(result, "```")
+		if startIdx != -1 {
+			result = result[startIdx+3:]
+			endIdx := strings.Index(result, "```")
+			if endIdx != -1 {
+				result = result[:endIdx]
+			}
+		}
+	}
 	result = strings.TrimSpace(result)
 
 	type scoreEntry struct {

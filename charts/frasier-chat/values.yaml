@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 2
 
 image:
   # Update with your actual artifact registry path
@@ -17,6 +17,7 @@ ports:
 env:
   LOGGING_LEVEL: "DEBUG"
   CROSS_ENCODER_URL: "http://cross-encoder-svc/frasier/rerank"
+  RAG_RERANKER_BACKEND: "gemini"
   
 # Database Configuration
 db:
