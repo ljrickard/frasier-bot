@@ -22,7 +22,7 @@ func RunRAGStreamPipeline(ctx context.Context, db *database.DB, cfg *config.RAGC
 	go func() {
 		defer close(outCh)
 
-		// Call the tracking packaging helper function systematically using the trace name
+		// System Telemetry tracking update driven by the core trace mapping dictionary name
 		tracing.SendStatusMessage(outCh, "Pipeline.RunRAGStreamPipeline")
 
 		var res RAGResult
@@ -123,7 +123,7 @@ func RunRAGStreamPipeline(ctx context.Context, db *database.DB, cfg *config.RAGC
 			return
 		}
 
-		// Fixed w reference leak: Tokens stream down the unified channel wrapped in an SSE protocol layer
+		// Fixed reference leak: Chunks safely move over the string proxy pipeline
 		for chunk := range streamChan {
 			if chunk.Err != nil {
 				outCh <- fmt.Sprintf("event: error\ndata: {\"message\": \"stream token read drop: %v\"}\n\n", chunk.Err)
