@@ -43,14 +43,9 @@ type localRerankReq struct {
 	Passages []string `json:"passages"`
 }
 
-type localRerankResp struct {
-	Index int     `json:"index"`
-	Score float64 `json:"score"`
-}
-
 func (s *Service) rerankWithLocal(ctx context.Context, query string, chunks []models.SearchResult, topN int) ([]models.SearchResult, error) {
 	traceID := tracing.GetTraceID(ctx)
-	slog.Debug("⚖️ [Reranker] Calling local cross-encoder model matrix calculations", "passages_count", len(chunks), "trace_id", traceID)
+	slog.Debug("⚖️ [Reranker] Calling cross-encoder model matrix calculations", "passages_count", len(chunks), "trace_id", traceID)
 
 	passages := make([]string, len(chunks))
 	for i, c := range chunks {
@@ -59,7 +54,7 @@ func (s *Service) rerankWithLocal(ctx context.Context, query string, chunks []mo
 
 	scores, err := s.Reranker.Rerank(ctx, query, passages)
 	if err != nil {
-		return nil, fmt.Errorf("reranker backend service failed: %w", err)
+		return nil, fmt.Errorf("cross-encoder service failed: %w", err)
 	}
 
 	sort.Slice(scores, func(i, j int) bool {

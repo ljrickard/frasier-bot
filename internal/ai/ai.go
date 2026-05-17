@@ -72,6 +72,41 @@ func (s *Service) GenerateAnswer(ctx context.Context, query string, chunks []mod
 	return answer, nil
 }
 
+func (s *Service) GenerateAnswerStream(ctx context.Context, query string, chunks []models.SearchResult, usePersona bool) (<-chan llm.StreamResult, error) {
+	traceID := tracing.GetTraceID(ctx)
+	var prompt string
+	temperature := defaultTemperature
+
+	slog.Debug("🤖 [Service] Compiling streaming prompt infrastructure layout", "use_persona", usePersona, "chunks_count", len(chunks), "trace_id", traceID)
+
+	if len(chunks) == 0 {
+		if usePersona {
+			prompt = fmt.Sprintf(promptPersonaVanilla, query)
+			temperature = 0.2
+		} else {
+			prompt = fmt.Sprintf(promptStandardVanilla, query)
+		}
+	} else {
+		var contextBuilder strings.Builder
+		for i, c := range chunks {
+			contextBuilder.WriteString(fmt.Sprintf("Chunk %d:\n", i+1))
+			contextBuilder.WriteString(fmt.Sprintf("Episode: %s [S%02dE%02d]\n", c.Title, c.Season, c.Episode))
+			contextBuilder.WriteString(fmt.Sprintf("URL: %s\n", c.URL))
+			contextBuilder.WriteString(fmt.Sprintf("Content: %s\n", c.Content))
+			contextBuilder.WriteString(fmt.Sprintf("Similarity: %.4f\n\n", c.Similarity))
+		}
+
+		if usePersona {
+			prompt = fmt.Sprintf(promptPersonaRAG, contextBuilder.String(), query)
+			temperature = 0.2
+		} else {
+			prompt = fmt.Sprintf(promptStandardRAG, contextBuilder.String(), query)
+		}
+	}
+
+	return s.LLM.GenerateTextStream(ctx, prompt, temperature)
+}
+
 func (s *Service) ClassifyQuery(ctx context.Context, query string) (string, error) {
 	traceID := tracing.GetTraceID(ctx)
 	slog.Debug("🧠 [Service] Dispatching classification request to intent switchboard", "trace_id", traceID)

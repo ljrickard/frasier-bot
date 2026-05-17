@@ -14,7 +14,7 @@ import (
 	"frasier-bot/internal/crossencoder"
 	"frasier-bot/internal/database"
 	"frasier-bot/internal/gemini"
-	"frasier-bot/internal/search"
+	"frasier-bot/internal/pipeline"
 	"frasier-bot/tracing"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -108,7 +108,6 @@ func main() {
 	}
 
 	encoderClient := crossencoder.NewClient(encoderURL)
-
 	aiService := ai.NewService(geminiClient, encoderClient)
 
 	mux := http.NewServeMux()
@@ -129,25 +128,18 @@ func main() {
 		}
 
 		activeCfg := *baseCfg
-
 		if len(req.Config) > 0 {
 			if err := json.Unmarshal(req.Config, &activeCfg); err != nil {
-				slog.Error("⚠️ Failed to merge config overrides, falling back to base config", "session_id", req.SessionID, "trace_id", traceID, "error", err)
-			} else {
-				slog.Debug("🔧 Merged request-provided RAG overrides", "session_id", req.SessionID, "trace_id", traceID)
+				slog.Error("⚠️ Failed to merge config overrides", "session_id", req.SessionID, "trace_id", traceID, "error", err)
 			}
 		}
 
 		reqCtx, reqCancel := context.WithTimeout(ctx, 60*time.Second)
 		defer reqCancel()
 
-		res, err := search.RunRAGPipeline(reqCtx, db, &activeCfg, aiService, req.Query)
+		// UPDATED TO USE PIPELINE PACKAGE
+		res, err := pipeline.RunRAGPipeline(reqCtx, db, &activeCfg, aiService, req.Query)
 		if err != nil {
-			if reqCtx.Err() == context.DeadlineExceeded {
-				slog.Error("Pipeline Timed Out", "session_id", req.SessionID, "trace_id", traceID)
-				http.Error(w, "Request Timed Out", http.StatusGatewayTimeout)
-				return
-			}
 			slog.Error("Pipeline Error", "session_id", req.SessionID, "trace_id", traceID, "error", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
@@ -161,7 +153,50 @@ func main() {
 		})
 	})
 
+	streamHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		traceID := tracing.GetTraceID(ctx)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			slog.Error("❌ Streaming unsupported by underlying network socket layer", "trace_id", traceID)
+			http.Error(w, "Streaming Unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		var req ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		activeCfg := *baseCfg
+		if len(req.Config) > 0 {
+			json.Unmarshal(req.Config, &activeCfg)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		// UPDATED TO USE PIPELINE PACKAGE
+		streamChan, err := pipeline.RunRAGStreamPipeline(ctx, db, &activeCfg, aiService, req.Query)
+		if err != nil {
+			slog.Error("❌ Streaming pipeline initiation crashed out", "trace_id", traceID, "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		for line := range streamChan {
+			fmt.Fprint(w, line)
+			flusher.Flush()
+		}
+
+		slog.Info("🏁 [Stream] Streaming text delivery loop closed cleanly", "trace_id", traceID)
+	})
+
 	mux.Handle("/chat", otelhttp.NewHandler(chatHandler, "POST /chat"))
+	mux.Handle("/chat/stream", otelhttp.NewHandler(streamHandler, "POST /chat/stream"))
 
 	slog.Info("🤖 Frasier Bot API Listening on :8080")
 	http.ListenAndServe(":8080", mux)
