@@ -106,6 +106,11 @@ func (db *DB) RunMigrations(ctx context.Context) error {
 	// 5. Create Indexes for performance
 	_, _ = db.Pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_chunks_show_id ON chunks(show_id)`)
 
+	_, err = db.Pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw ON chunks USING hnsw (embedding vector_cosine_ops)`)
+	if err != nil {
+		return fmt.Errorf("failed to create HNSW vector index: %w", err)
+	}
+
 	return nil
 }
 
